@@ -1,0 +1,641 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:perulapia_connect/vista_admin.dart';
+import 'dart:convert';
+
+// Importamos TODAS las vistas de los diferentes roles
+import 'vista_consumidor.dart';
+import 'vista_comerciante.dart';
+import 'vista_repartidor.dart';
+import 'red.dart'; // <-- IMPORTADO
+
+// ==========================================
+// 1. PANTALLA DE INICIAR SESIÓN (LOGIN)
+// ==========================================
+class LoginPantalla extends StatefulWidget {
+  const LoginPantalla({super.key});
+
+  @override
+  State<LoginPantalla> createState() => _LoginPantallaState();
+}
+
+class _LoginPantallaState extends State<LoginPantalla> {
+  final TextEditingController _loginUsuarioController = TextEditingController();
+  final TextEditingController _loginContrasenaController =
+      TextEditingController();
+
+  bool _estaCargando = false;
+
+  @override
+  void dispose() {
+    _loginUsuarioController.dispose();
+    _loginContrasenaController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              GestureDetector(
+                onLongPress: () {
+                  // EL ATAJO SECRETO DEL ARQUITECTO
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const VistaAdmin()),
+                  );
+                },
+                child: const Icon(Icons.delivery_dining,
+                    size: 80, color: Colors.blue),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Conecta Perulapia',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 40),
+              TextField(
+                controller: _loginUsuarioController,
+                decoration: const InputDecoration(
+                  labelText: 'Correo, Teléfono o DUI',
+                  prefixIcon: Icon(Icons.person),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _loginContrasenaController,
+                decoration: const InputDecoration(
+                  labelText: 'Contraseña',
+                  prefixIcon: Icon(Icons.lock),
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () {
+                    debugPrint('Ir a recuperar contraseña...');
+                  },
+                  child: const Text(
+                    '¿Olvidaste tu contraseña?',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _estaCargando
+                    ? null
+                    : () async {
+                        final String usuario = _loginUsuarioController.text;
+                        final String contrasena =
+                            _loginContrasenaController.text;
+
+                        final mensajero = ScaffoldMessenger.of(context);
+                        final navegador = Navigator.of(context);
+
+                        if (usuario.isEmpty || contrasena.isEmpty) {
+                          mensajero.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Por favor completa todos los campos',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        setState(() {
+                          _estaCargando = true;
+                        });
+
+                        try {
+                          final url = Uri.parse(
+                            '$urlCentral/login/',
+                          );
+                          final respuesta = await http.post(
+                            url,
+                            headers: {'Content-Type': 'application/json'},
+                            body: json.encode({
+                              'identificador': usuario,
+                              'contrasena': contrasena,
+                            }),
+                          );
+
+                          if (!mounted) return;
+
+                          if (respuesta.statusCode == 200) {
+                            final datosRespuesta = json.decode(respuesta.body);
+
+                            if (datosRespuesta['status'] == 'ok') {
+                              // 🔥 LÓGICA DE ENRUTAMIENTO MAESTRO
+                              final String rolUser = datosRespuesta['rol']
+                                      ?.toString()
+                                      .toLowerCase() ??
+                                  'cliente';
+                              final String nombreUser =
+                                  datosRespuesta['nombre']?.toString() ??
+                                      'Usuario Conecta';
+
+                              final String idComercioReal =
+                                  datosRespuesta['id']?.toString() ?? '1';
+
+                              if (rolUser == 'comerciante' ||
+                                  rolUser == 'comercio') {
+                                navegador.pushReplacement(
+                                  MaterialPageRoute(
+                                    builder: (context) => VistaComerciante(
+                                      nombreComercio: nombreUser,
+                                      idComercio: idComercioReal,
+                                    ),
+                                  ),
+                                );
+                              } else if (rolUser == 'repartidor') {
+                                navegador.pushReplacement(
+                                  MaterialPageRoute(
+                                    builder: (context) => VistaRepartidor(
+                                      nombre: nombreUser,
+                                      idUsuario: 1,
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                navegador.pushReplacement(
+                                  MaterialPageRoute(
+                                    builder: (context) => VistaConsumidor(
+                                      nombre: nombreUser,
+                                      rol: rolUser,
+                                    ),
+                                  ),
+                                );
+                              }
+                            } else {
+                              mensajero.showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Error: ${datosRespuesta['mensaje']}',
+                                  ),
+                                ),
+                              );
+                            }
+                          } else {
+                            mensajero.showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Error de conexión con el servidor.',
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          mensajero.showSnackBar(
+                            const SnackBar(
+                              content: Text('Sin conexión a la Central.'),
+                            ),
+                          );
+                        } finally {
+                          if (mounted) {
+                            setState(() {
+                              _estaCargando = false;
+                            });
+                          }
+                        }
+                      },
+                child: _estaCargando
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Text('Ingresar', style: TextStyle(fontSize: 18)),
+              ),
+              const SizedBox(height: 30),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('¿No tienes una cuenta? '),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RegistroPantalla(),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Crear una cuenta',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 2. PANTALLA DE REGISTRO SOFISTICADA
+// ==========================================
+class RegistroPantalla extends StatefulWidget {
+  const RegistroPantalla({super.key});
+
+  @override
+  State<RegistroPantalla> createState() => _RegistroPantallaState();
+}
+
+class _RegistroPantallaState extends State<RegistroPantalla> {
+  String tipoUsuario = 'Cliente';
+  String metodoPago = 'Efectivo';
+  String tipoVehiculo = 'Motocicleta';
+  bool _guardandoRegistro = false;
+
+  final TextEditingController _nombreController = TextEditingController();
+  final TextEditingController _telefonoController = TextEditingController();
+  final TextEditingController _correoController = TextEditingController();
+  final TextEditingController _contrasenaController = TextEditingController();
+  final TextEditingController _duiController = TextEditingController();
+  final TextEditingController _nombreComercioController =
+      TextEditingController();
+  final TextEditingController _licenciaController = TextEditingController();
+  final TextEditingController _circulacionController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nombreController.dispose();
+    _telefonoController.dispose();
+    _correoController.dispose();
+    _contrasenaController.dispose();
+    _duiController.dispose();
+    _nombreComercioController.dispose();
+    _licenciaController.dispose();
+    _circulacionController.dispose();
+    super.dispose();
+  }
+
+  void _limpiarFormulario() {
+    _nombreController.clear();
+    _telefonoController.clear();
+    _correoController.clear();
+    _contrasenaController.clear();
+    _duiController.clear();
+    _nombreComercioController.clear();
+    _licenciaController.clear();
+    _circulacionController.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Registro de Usuario'), elevation: 0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Ingresa tus datos base',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _nombreController,
+              decoration: const InputDecoration(
+                labelText: 'Nombre completo (Legal)',
+                prefixIcon: Icon(Icons.person),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _telefonoController,
+              decoration: const InputDecoration(
+                labelText: 'Teléfono (Obligatorio)',
+                prefixIcon: Icon(Icons.phone),
+              ),
+              keyboardType: TextInputType.phone,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _correoController,
+              decoration: const InputDecoration(
+                labelText: 'Correo electrónico',
+                prefixIcon: Icon(Icons.email),
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _contrasenaController,
+              decoration: const InputDecoration(
+                labelText: 'Contraseña',
+                prefixIcon: Icon(Icons.lock),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _duiController,
+                    decoration: const InputDecoration(
+                      labelText: 'Documento Único de Identidad (DUI)',
+                      prefixIcon: Icon(Icons.badge),
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(
+                    Icons.camera_alt,
+                    color: Colors.blue,
+                    size: 28,
+                  ),
+                  onPressed: () {},
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            DropdownButtonFormField<String>(
+              initialValue: tipoUsuario,
+              decoration: const InputDecoration(
+                labelText: '¿Cómo usarás la app?',
+                prefixIcon: Icon(Icons.account_circle),
+              ),
+              items: ['Cliente', 'Comercio', 'Repartidor'].map((String valor) {
+                return DropdownMenuItem<String>(
+                  value: valor,
+                  child: Text(valor),
+                );
+              }).toList(),
+              onChanged: (nuevoValor) {
+                setState(() {
+                  tipoUsuario = nuevoValor!;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            if (tipoUsuario == 'Comercio') ...[
+              TextField(
+                controller: _nombreComercioController,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre de tu Comercio / Local',
+                  prefixIcon: Icon(Icons.storefront),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            DropdownButtonFormField<String>(
+              initialValue: metodoPago,
+              decoration: const InputDecoration(
+                labelText: 'Método de pago principal',
+                prefixIcon: Icon(Icons.account_balance_wallet),
+              ),
+              items: ['Efectivo', 'Tarjeta', 'Bitcoin (Chivo Wallet)'].map((
+                String valor,
+              ) {
+                return DropdownMenuItem<String>(
+                  value: valor,
+                  child: Text(valor),
+                );
+              }).toList(),
+              onChanged: (nuevoValor) {
+                setState(() {
+                  metodoPago = nuevoValor!;
+                });
+              },
+            ),
+            const SizedBox(height: 24),
+            if (tipoUsuario == 'Repartidor') ...[
+              const Divider(thickness: 2),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12.0),
+                child: Text(
+                  'Detalles de Logística',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: tipoVehiculo,
+                decoration: const InputDecoration(
+                  labelText: 'Tipo de vehículo',
+                  prefixIcon: Icon(Icons.two_wheeler),
+                ),
+                items: ['Bicicleta', 'Motocicleta', 'Automóvil'].map((
+                  String valor,
+                ) {
+                  return DropdownMenuItem<String>(
+                    value: valor,
+                    child: Text(valor),
+                  );
+                }).toList(),
+                onChanged: (nuevoValor) {
+                  setState(() {
+                    tipoVehiculo = nuevoValor!;
+                  });
+                },
+              ),
+              const SizedBox(height: 16),
+              if (tipoVehiculo == 'Motocicleta' ||
+                  tipoVehiculo == 'Automóvil') ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _licenciaController,
+                        decoration: const InputDecoration(
+                          labelText: 'Número de Licencia',
+                          prefixIcon: Icon(Icons.assignment_ind),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.camera_alt,
+                        color: Colors.blue,
+                        size: 28,
+                      ),
+                      onPressed: () {},
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _circulacionController,
+                        decoration: const InputDecoration(
+                          labelText: 'Tarjeta de Circulación',
+                          prefixIcon: Icon(Icons.directions_car),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.camera_alt,
+                        color: Colors.blue,
+                        size: 28,
+                      ),
+                      onPressed: () {},
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 24),
+            ],
+            const Divider(thickness: 1),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                side: const BorderSide(color: Colors.blue, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: const Icon(Icons.face, size: 26),
+              label: const Text(
+                'Fotografía de Verificación (Rostro Frontal)',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              onPressed: () {},
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: _guardandoRegistro
+                  ? null
+                  : () async {
+                      final mensajero = ScaffoldMessenger.of(context);
+                      if (_nombreController.text.isEmpty ||
+                          _telefonoController.text.isEmpty ||
+                          _contrasenaController.text.isEmpty) {
+                        mensajero.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Por favor completa los campos principales obligatorios',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                      setState(() {
+                        _guardandoRegistro = true;
+                      });
+
+                      // 🛠️ LLAVES CORREGIDAS PARA EVITAR EL ERROR 422 DE PYTHON
+                      final Map<String, dynamic> datosRegistro = {
+                        'nombre': _nombreController.text.trim(),
+                        'telefono': _telefonoController.text.trim(),
+                        'correo': _correoController.text.trim(),
+                        'contrasena': _contrasenaController.text.trim(),
+                        'dui': _duiController.text.trim().isNotEmpty
+                            ? _duiController.text.trim()
+                            : "00000000-0",
+                        'rol': tipoUsuario.toLowerCase(),
+                        'direccion': "San Bartolomé Perulapía",
+                        'foto_perfil': "Sin foto"
+                      };
+
+                      try {
+                        final respuesta = await http.post(
+                          Uri.parse(
+                            '$urlCentral/registrar_usuario',
+                          ),
+                          headers: {'Content-Type': 'application/json'},
+                          body: json.encode(datosRegistro),
+                        );
+                        if (!mounted) return;
+                        if (respuesta.statusCode == 200) {
+                          mensajero.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                '¡Registro guardado con éxito! Pendiente de aprobación.',
+                              ),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                          _limpiarFormulario();
+                        } else {
+                          mensajero.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Error en el motor. Código: ${respuesta.statusCode}',
+                              ),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        mensajero.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Error de conexión: No se pudo llegar a la Central.',
+                            ),
+                          ),
+                        );
+                      } finally {
+                        if (mounted) {
+                          setState(() {
+                            _guardandoRegistro = false;
+                          });
+                        }
+                      }
+                    },
+              child: _guardandoRegistro
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Text(
+                      'Completar Registro',
+                      style: TextStyle(fontSize: 18),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

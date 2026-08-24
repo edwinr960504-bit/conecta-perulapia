@@ -1,0 +1,30 @@
+name: perulapia_connect
+description: "Perulapia Connect - App de entregas"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # === TUS HERRAMIENTAS DE CONEXIÓN Y HARDWARE ===
+  http: ^1.2.0
+  geolocator: ^13.0.1
+  image_picker: ^1.2.3
+  url_launcher: ^6.2.5
+  record: ^7.1.1
+  audioplayers: ^6.8.1
+  permission_handler: ^13.0.1
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
