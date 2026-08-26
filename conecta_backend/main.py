@@ -15,6 +15,97 @@ import tuberias_admin
 import tuberias_identidad
 import tuberias_negocio
 import adm_soporte
+import sqlite3
+import os
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
+
+def inicializar_base_maestra():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    
+    # 1. Tabla de Usuarios (Clientes y Repartidores)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id_usuario INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            telefono TEXT,
+            correo TEXT,
+            contrasena TEXT,
+            rol TEXT,
+            dui TEXT,
+            direccion TEXT,
+            tipo_vehiculo TEXT DEFAULT 'N/A',
+            licencia TEXT DEFAULT 'N/A',
+            tarjeta_circulacion TEXT DEFAULT 'N/A',
+            foto_perfil TEXT DEFAULT 'Sin foto',
+            estado TEXT DEFAULT 'pendiente'
+        )
+    """)
+    
+    # 2. Tabla de Comercios
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS comercios (
+            id_comercio INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre_local TEXT,
+            telefono TEXT,
+            correo TEXT,
+            contrasena TEXT,
+            direccion TEXT,
+            tipo_plan TEXT,
+            logo TEXT,
+            estado TEXT DEFAULT 'pendiente',
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # 3. Tabla de Pedidos Principal
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id_pedido INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_cliente INTEGER,
+            id_comercio INTEGER,
+            descripcion TEXT,
+            precio_comida REAL,
+            tarifa_envio REAL,
+            comision_app REAL,
+            total_pago REAL,
+            distancia_km REAL,
+            pin_seguridad TEXT,
+            pin_recoleccion TEXT,
+            codigo_rastreo TEXT,
+            metodo_pago TEXT,
+            estado TEXT DEFAULT 'pendiente',
+            id_repartidor INTEGER DEFAULT 0,
+            latitud_repartidor REAL DEFAULT 0.0,
+            longitud_repartidor REAL DEFAULT 0.0,
+            latitud_cliente REAL DEFAULT 13.7333,
+            longitud_cliente REAL DEFAULT -89.1167,
+            tiempo_preparacion TEXT DEFAULT 'Por confirmar',
+            numero_diario INTEGER DEFAULT 1,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            fecha_entrega TEXT
+        )
+    """)
+    
+    # 4. Tabla de Productos del Menú
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS productos (
+            id_producto INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_comercio INTEGER,
+            nombre_producto TEXT,
+            descripcion TEXT,
+            precio REAL,
+            foto_platillo TEXT,
+            disponible INTEGER DEFAULT 1
+        )
+    """)
+    
+    conexion.commit()
+    conexion.close()
+
+# Ejecutar al arrancar el servidor principal
+inicializar_base_maestra()
 
 # --- CREACIÓN DE LA APLICACIÓN PRINCIPAL ---
 app = FastAPI(
