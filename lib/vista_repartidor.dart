@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'dart:async';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'vista_login.dart';
 import 'carrito_service.dart';
@@ -37,6 +38,25 @@ class _VistaRepartidorState extends State<VistaRepartidor> {
   int _llaveRadar = 0;
   int _llaveViaje = 0;
   int _llaveBilletera = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // 🔥 LLAMADA OBLIGATORIA AL ARRANCAR PARA FORZAR EL GPS EN ANDROID
+    _verificarYPedirPermisosGPS();
+  }
+
+  Future<void> _verificarYPedirPermisosGPS() async {
+    var status = await Permission.location.status;
+    if (!status.isGranted) {
+      // Esto obliga a Android a desplegar la ventana de permisos de ubicación de inmediato
+      var resultado = await Permission.location.request();
+      if (resultado.isPermanentlyDenied) {
+        // Si el usuario lo denegó antes por completo, lo mandamos a los ajustes del teléfono
+        openAppSettings();
+      }
+    }
+  }
 
   void _cambiarPestana(int indice) {
     setState(() {

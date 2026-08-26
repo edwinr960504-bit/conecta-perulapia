@@ -8,8 +8,47 @@ import 'red.dart'; // <--- Cerebro de red
 class GpsService {
   static Timer? _timerLatido;
 
+  // 🔥 NUEVA FUNCIÓN: PIDE PERMISO DE GPS EXPLÍCITAMENTE AL ENTRAR
+  static Future<bool> solicitarPermisosGps() async {
+    bool servicioHabilitado;
+    LocationPermission permiso;
+
+    // 1. Verifica si el GPS general del celular está encendido
+    servicioHabilitado = await Geolocator.isLocationServiceEnabled();
+    if (!servicioHabilitado) {
+      debugPrint("⚠️ El GPS del dispositivo está desactivado.");
+      return false;
+    }
+
+    // 2. Revisa el estado actual de los permisos
+    permiso = await Geolocator.checkPermission();
+    if (permiso == LocationPermission.denied) {
+      permiso = await Geolocator.requestPermission();
+      if (permiso == LocationPermission.denied) {
+        debugPrint("❌ Permiso de ubicación denegado por el usuario.");
+        return false;
+      }
+    }
+
+    if (permiso == LocationPermission.deniedForever) {
+      debugPrint("❌ Permiso de ubicación denegado permanentemente.");
+      return false;
+    }
+
+    return true;
+  }
+
   // 🔥 INICIA LOS LATIDOS AUTOMÁTICOS EN SEGUNDO PLANO
-  static void iniciarLatidosGps(int idPedido, {int segundosIntervalo = 10}) {
+  static void iniciarLatidosGps(int idPedido,
+      {int segundosIntervalo = 10}) async {
+    // Validamos permisos antes de arrancar los latidos
+    bool tienePermiso = await solicitarPermisosGps();
+    if (!tienePermiso) {
+      debugPrint(
+          "❌ No se pudieron iniciar los latidos GPS por falta de permisos.");
+      return;
+    }
+
     // Si ya había uno corriendo, lo matamos para evitar duplicados
     detenerLatidosGps();
 
@@ -38,15 +77,6 @@ class GpsService {
   // FUNCIÓN INTERNA QUE HACE EL TRABAJO SUCIO DE LEER EL GPS Y MANDARLO A PYTHON
   static Future<void> _enviarCoordenadaUnica(int idPedido) async {
     try {
-      LocationPermission permiso = await Geolocator.checkPermission();
-      if (permiso == LocationPermission.denied) {
-        permiso = await Geolocator.requestPermission();
-        if (permiso == LocationPermission.denied) {
-          debugPrint("❌ El motorista no dio permiso para usar el GPS.");
-          return;
-        }
-      }
-
       Position posicion = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -54,8 +84,7 @@ class GpsService {
       );
 
       debugPrint(
-        "📍 GPS Real capturado: Lat ${posicion.latitude}, Lon ${posicion.longitude}",
-      );
+          "📍 GPS Real capturado: Lat ${posicion.latitude}, Lon ${posicion.longitude}");
 
       final url = Uri.parse('$urlCentral/actualizar_gps');
 
@@ -73,8 +102,7 @@ class GpsService {
         debugPrint("✅ ¡Ubicación guardada en Python con éxito!");
       } else {
         debugPrint(
-          "⚠️ Python rechazó el paquete: ${respuesta.statusCode} - ${respuesta.body}",
-        );
+            "⚠️ Python rechazó el paquete: ${respuesta.statusCode} - ${respuesta.body}");
       }
     } catch (e) {
       debugPrint("❌ Error crítico en el servicio de GPS: $e");
