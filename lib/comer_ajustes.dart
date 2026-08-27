@@ -6,9 +6,6 @@ import 'dart:io';
 
 import 'red.dart';
 
-// ========================================================
-// VISTA AJUSTES DEL LOCAL
-// ========================================================
 class VistaAjustesLocal extends StatefulWidget {
   final String idComercio;
   final String nombreActual;
@@ -34,17 +31,48 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
   bool _guardando = false;
 
   File? _logoLocal;
+  String? _urlLogoRemoto;
   final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
     _nombreCtrl = TextEditingController(text: widget.nombreActual);
+    _cargarDatosActualesComercio();
+  }
+
+  // 🔥 CARGA DIRECTA DESDE EL ENDPOINT EXCLUSIVO DEL COMERCIO
+  Future<void> _cargarDatosActualesComercio() async {
+    try {
+      final url =
+          Uri.parse('$urlCentral/api/comercio/perfil/${widget.idComercio}');
+      final res = await http.get(url).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200 && mounted) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        if (data['status'] == 'ok') {
+          setState(() {
+            _direccionCtrl.text = data['direccion'] ?? '';
+            _horariosCtrl.text = data['horarios'] ?? '';
+            if (data['logo'] != null &&
+                data['logo'].toString().isNotEmpty &&
+                data['logo'] != 'Sin logo') {
+              final String logoPath = data['logo'];
+              _urlLogoRemoto = logoPath.startsWith('http')
+                  ? logoPath
+                  : '$urlCentral$logoPath';
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error cargando perfil del comercio: $e");
+    }
   }
 
   Future<void> _cambiarLogo() async {
     final XFile? fotoSeleccionada = await _picker.pickImage(
       source: ImageSource.gallery,
+      imageQuality: 80,
     );
 
     if (fotoSeleccionada != null) {
@@ -55,17 +83,42 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
           'POST',
           Uri.parse('$urlCentral/subir_foto_comercio/'),
         );
+        request.fields['id_comercio'] = widget.idComercio.toString();
         request.files.add(
           await http.MultipartFile.fromPath('file', fotoSeleccionada.path),
         );
 
         var res = await request.send();
         if (res.statusCode == 200) {
+          var responseData = await res.stream.bytesToString();
+          var jsonData = json.decode(responseData);
+          String rutaServidor = jsonData['url'] ?? '';
+
+          if (!mounted) return;
+
+          setState(() {
+            if (rutaServidor.isNotEmpty) {
+              _urlLogoRemoto = rutaServidor.startsWith('http')
+                  ? rutaServidor
+                  : '$urlCentral$rutaServidor';
+            }
+            _logoLocal =
+                null; // Limpiamos la local para priorizar la red sincronizada
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("📸 Logo del local actualizado y guardado"),
+              backgroundColor: Colors.green,
+            ),
+          );
+          _cargarDatosActualesComercio();
+        } else {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("📸 Logo del local actualizado"),
-              backgroundColor: Colors.green,
+              content: Text("Error al subir la foto al servidor"),
+              backgroundColor: Colors.red,
             ),
           );
         }
@@ -102,7 +155,8 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context);
+        Navigator.pop(
+            context, true); // Retornamos true para refrescar la vista principal
       }
     } catch (e) {
       debugPrint("🚨 Error al guardar: $e");
@@ -144,7 +198,12 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                                   image: FileImage(_logoLocal!),
                                   fit: BoxFit.cover,
                                 )
-                              : null,
+                              : (_urlLogoRemoto != null
+                                  ? DecorationImage(
+                                      image: NetworkImage(_urlLogoRemoto!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withValues(alpha: 0.1),
@@ -152,7 +211,7 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                             )
                           ],
                         ),
-                        child: _logoLocal == null
+                        child: (_logoLocal == null && _urlLogoRemoto == null)
                             ? const Icon(Icons.store,
                                 size: 60, color: Colors.white)
                             : null,

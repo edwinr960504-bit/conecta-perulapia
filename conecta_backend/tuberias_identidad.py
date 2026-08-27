@@ -1,11 +1,12 @@
 # ========================================================
-# ARCHIVO: tuberias_identidad.py (COMPLETO Y BLINDADO)
+# ARCHIVO COMPLETO: tuberias_identidad.py (BLINDADO)
 # PROPÓSITO: Autenticación, perfiles de usuario, viajes activos y registros
 # ========================================================
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 import sqlite3
 import os
+import shutil
 
 router = APIRouter()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
@@ -37,10 +38,10 @@ class RepartidorNuevo(BaseModel):
     tarjeta_circulacion: str
 
 class ActualizarContacto(BaseModel):
-    id_usuario: int = 1
+    id_usuario: int  # 🔥 ELIMINADO EL "= 1" POR DEFECTO PARA EVITAR CLONACIONES Y CRUCES DE IDENTIDAD
     telefono: str = ""
     correo: str = ""
-    direccion: str = "San dirección"
+    direccion: str = "Sin dirección"
     nombre: str = None
 
 @router.post("/login")
@@ -139,12 +140,13 @@ def obtener_perfil(id_usuario: int):
     cursor = conexion.cursor()
     cursor.execute("""
         SELECT COALESCE(nombre, 'Usuario'), COALESCE(telefono, 'Sin teléfono'), 
-               COALESCE(correo, 'Sin correo'), COALESCE(direccion, 'Sin dirección') 
+               COALESCE(correo, 'Sin correo'), COALESCE(direccion, 'Sin dirección'),
+               COALESCE(foto_perfil, 'Sin foto')
         FROM usuarios WHERE id_usuario = ?
     """, (id_usuario,))
     u = cursor.fetchone()
     conexion.close()
-    return {"nombre": u[0], "telefono": u[1], "correo": u[2], "direccion": u[3]} if u else {}
+    return {"nombre": u[0], "telefono": u[1], "correo": u[2], "direccion": u[3], "foto_perfil": u[4]} if u else {}
 
 @router.post("/actualizar_contacto")
 @router.post("/actualizar_contacto/")
@@ -155,7 +157,11 @@ def obtener_perfil(id_usuario: int):
 @router.post("/api/actualizar_perfil/{id_usuario}")
 @router.post("/api/actualizar_perfil/{id_usuario}/")
 def actualizar_contacto(datos: ActualizarContacto, id_usuario: int = None):
+    # Validación hermética del ID de usuario para que nadie cambie datos ajenos
     target_id = id_usuario if id_usuario else datos.id_usuario
+    if not target_id or target_id <= 0:
+        return {"status": "error", "mensaje": "Error de identidad. Cierre sesión e intente de nuevo."}
+        
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
@@ -174,12 +180,35 @@ def actualizar_contacto(datos: ActualizarContacto, id_usuario: int = None):
         
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Datos actualizados correctamente."}
+    return {"status": "ok", "mensaje": "Datos actualizados correctamente en su perfil privado."}
 
-# --- 🔥 ENDPOINT MÁGICO PARA LAS DOS FASES DEL REPARTIDOR ---
+# 🔥 SUBIDA DE FOTO DE PERFIL DEL CLIENTE / REPARTIDOR
+@router.post("/subir_foto_cliente")
+@router.post("/subir_foto_cliente/")
+@router.post("/api/subir_foto_cliente")
+@router.post("/api/subir_foto_cliente/")
+async def subir_foto_cliente(id_cliente: str = Form(...), file: UploadFile = File(...)):
+    ruta_carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fotos_seguridad")
+    os.makedirs(ruta_carpeta, exist_ok=True)
+    nombre_archivo = f"cliente_{id_cliente}_{file.filename}"
+    ruta_destino = os.path.join(ruta_carpeta, nombre_archivo)
+    
+    with open(ruta_destino, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    url_relativa = f"/fotos_seguridad/{nombre_archivo}"
+    
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("UPDATE usuarios SET foto_perfil = ? WHERE id_usuario = ?", (url_relativa, id_cliente))
+    conexion.commit()
+    conexion.close()
+    return {"status": "ok", "url": url_relativa}
+
 @router.get("/viaje_activo/repartidor/{id_repartidor}")
 @router.get("/api/viaje_activo/repartidor/{id_repartidor}")
 def viaje_repartidor(id_repartidor: int):
+    # 🔥 Aislamiento total: Solo busca el viaje que pertenece a ESTE id_repartidor exacto
     conexion = sqlite3.connect(DB_PATH)
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()

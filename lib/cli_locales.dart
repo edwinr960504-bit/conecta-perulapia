@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:convert';
 import 'cli_menu_local.dart';
 import 'red.dart';
 
 class CliLocales extends StatefulWidget {
+  final int idCliente; // 🔥 NUEVO: Recibe la identidad real del consumidor
   final VoidCallback onIrARastreo;
   final VoidCallback onActualizar;
   const CliLocales({
     super.key,
+    required this.idCliente,
     required this.onIrARastreo,
     required this.onActualizar,
   });
@@ -21,16 +24,29 @@ class _CliLocalesState extends State<CliLocales> {
   String _textoBusqueda = "";
   List<dynamic> _comercios = [];
   bool _cargando = true;
+  Timer? _timerLocales;
 
   @override
   void initState() {
     super.initState();
     _cargarComercios();
+    _timerLocales = Timer.periodic(const Duration(seconds: 5), (timer) {
+      _cargarComerciosSilencioso();
+    });
   }
 
-  // 🔥 NUEVA FUNCIÓN: Permite refrescar la lista a demanda
+  @override
+  void dispose() {
+    _timerLocales?.cancel();
+    super.dispose();
+  }
+
   Future<void> _cargarComercios() async {
     if (mounted) setState(() => _cargando = true);
+    await _cargarComerciosSilencioso();
+  }
+
+  Future<void> _cargarComerciosSilencioso() async {
     try {
       final url = Uri.parse('$urlCentral/comercios_activos');
       final respuesta = await http.get(url).timeout(const Duration(seconds: 5));
@@ -41,18 +57,38 @@ class _CliLocalesState extends State<CliLocales> {
             _cargando = false;
           });
         }
-      } else {
-        if (mounted) setState(() => _cargando = false);
       }
     } catch (e) {
-      debugPrint("🚨 Error cargando comercios: $e");
-      if (mounted) setState(() => _cargando = false);
+      debugPrint("🚨 Error silencioso cargando comercios: $e");
     }
+  }
+
+  String _obtenerUrlImagen(String ruta) {
+    if (ruta.isEmpty || ruta == 'Sin foto' || ruta == 'Sin logo') return '';
+    if (ruta.startsWith('http')) return ruta;
+    if (ruta.startsWith('/')) {
+      return '$urlCentral$ruta';
+    }
+    return '$urlCentral/$ruta';
+  }
+
+  Widget _iconoLocalPorDefecto() {
+    return Container(
+      width: 75,
+      height: 75,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 5)
+        ],
+      ),
+      child: const Icon(Icons.storefront, color: Color(0xFF1E3A8A), size: 40),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Filtrado en vivo de los comercios abiertos
     final comerciosFiltrados = _comercios.where((c) {
       final n =
           (c['nombre'] ?? c['nombre_local'] ?? '').toString().toLowerCase();
@@ -75,10 +111,9 @@ class _CliLocalesState extends State<CliLocales> {
           ),
         ),
         Expanded(
-          child: _cargando
+          child: _cargando && _comercios.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(
-                  // 🔥 MAGIA: Deslizar hacia abajo refresca la base de datos y desaparece locales cerrados
                   onRefresh: _cargarComercios,
                   child: comerciosFiltrados.isEmpty
                       ? ListView(
@@ -98,58 +133,174 @@ class _CliLocalesState extends State<CliLocales> {
                           itemCount: comerciosFiltrados.length,
                           itemBuilder: (context, index) {
                             final comercio = comerciosFiltrados[index];
-                            return Card(
-                              elevation: 2,
-                              margin: const EdgeInsets.only(bottom: 15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(15),
+                            final String logoCrudo = comercio['logo'] ?? '';
+                            final String logoFinal =
+                                _obtenerUrlImagen(logoCrudo);
+
+                            // Fotos dinámicas del menú del local para armar el fondo collage
+                            final List<dynamic> fotosProds =
+                                comercio['fotos_productos'] ?? [];
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.08),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
                               ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.all(10),
-                                leading: Container(
-                                  width: 60,
-                                  height: 60,
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade200,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(Icons.storefront,
-                                      color: Color(0xFF1E3A8A), size: 35),
-                                ),
-                                title: Text(
-                                  comercio['nombre'] ??
-                                      comercio['nombre_local'] ??
-                                      'Local',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                subtitle: Text(comercio['direccion'] ??
-                                    'Comercio General'),
-                                trailing: const Icon(
-                                  Icons.arrow_forward_ios,
-                                  color: Color(0xFF1E3A8A),
-                                  size: 20,
-                                ),
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => CliMenuLocal(
-                                        idComercio: comercio['id'].toString(),
-                                        nombreComercio:
-                                            comercio['nombre'] ?? 'Local',
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(18),
+                                child: Stack(
+                                  children: [
+                                    // 🎨 FONDO COLLAGE CON LOS PLATOS TÍPICOS DEL LOCAL
+                                    Positioned.fill(
+                                      child: fotosProds.isNotEmpty
+                                          ? Row(
+                                              children: fotosProds.map((foto) {
+                                                return Expanded(
+                                                  child: Image.network(
+                                                    _obtenerUrlImagen(
+                                                        foto.toString()),
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder:
+                                                        (_, __, ___) =>
+                                                            Container(
+                                                                color: Colors
+                                                                    .grey[200]),
+                                                  ),
+                                                );
+                                              }).toList(),
+                                            )
+                                          : Container(
+                                              color: Colors.grey.shade100),
+                                    ),
+
+                                    // 🛡️ CAPA TRANSLÚCIDA (OVERLAY) ORIGINAL
+                                    Positioned.fill(
+                                      child: Container(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.32),
                                       ),
                                     ),
-                                  ).then((pagado) {
-                                    if (pagado == true) {
-                                      widget.onIrARastreo();
-                                    } else {
-                                      widget.onActualizar();
-                                    }
-                                  });
-                                },
+
+                                    // 📋 CONTENIDO PRINCIPAL DE LA TARJETA
+                                    InkWell(
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => CliMenuLocal(
+                                              idComercio:
+                                                  comercio['id'].toString(),
+                                              nombreComercio:
+                                                  comercio['nombre'] ?? 'Local',
+                                              idCliente: widget
+                                                  .idCliente, // 🔥 SE LE PASA EL ID AL MENÚ CORRECTAMENTE
+                                            ),
+                                          ),
+                                        ).then((pagado) {
+                                          if (pagado == true) {
+                                            widget.onIrARastreo();
+                                          } else {
+                                            widget.onActualizar();
+                                          }
+                                        });
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(12.0),
+                                        child: Row(
+                                          children: [
+                                            // LOGO DEL LOCAL
+                                            ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              child: logoFinal.isNotEmpty
+                                                  ? Image.network(
+                                                      logoFinal,
+                                                      width: 75,
+                                                      height: 75,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder: (_, __,
+                                                              ___) =>
+                                                          _iconoLocalPorDefecto(),
+                                                    )
+                                                  : _iconoLocalPorDefecto(),
+                                            ),
+                                            const SizedBox(width: 14),
+
+                                            // TEXTOS CON MÁXIMO GROSOR Y RESPLANDOR BLANCO
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Text(
+                                                    comercio['nombre'] ??
+                                                        comercio[
+                                                            'nombre_local'] ??
+                                                        'Local',
+                                                    style: const TextStyle(
+                                                      fontSize: 18,
+                                                      fontWeight: FontWeight
+                                                          .w900, // Súper negrita
+                                                      color: Color.fromARGB(
+                                                          255,
+                                                          12,
+                                                          0,
+                                                          0), // Negro puro
+                                                      shadows: [
+                                                        Shadow(
+                                                          offset: Offset(0, 0),
+                                                          blurRadius: 3.0,
+                                                          color: Colors
+                                                              .white, // Halo blanco alrededor
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    comercio['direccion'] ??
+                                                        'Comercio General',
+                                                    style: const TextStyle(
+                                                      color: Color(
+                                                          0xDD000000), // Tono más oscuro y firme
+                                                      fontSize: 15,
+                                                      fontWeight: FontWeight
+                                                          .w800, // Letra gruesa
+                                                      shadows: [
+                                                        Shadow(
+                                                          offset: Offset(0, 0),
+                                                          blurRadius: 2.5,
+                                                          color: Colors
+                                                              .white, // Halo blanco para la dirección
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+
+                                            // FLECHA DE ACCESO
+                                            const Icon(
+                                              Icons.arrow_forward_ios,
+                                              color: Color(0xFF1E3A8A),
+                                              size: 18,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             );
                           },

@@ -1,5 +1,5 @@
 # ========================================================
-# ARCHIVO: adm_soporte.py (VERSIÓN MAESTRA BLINDADA)
+# ARCHIVO: adm_soporte.py (VERSIÓN WHATSAPP + BORRADO NUCLEAR)
 # PROPÓSITO: Chat en vivo, Tickets de Soporte, Alertas y Publicidad
 # ========================================================
 from fastapi import APIRouter, UploadFile, File
@@ -27,6 +27,10 @@ def asegurar_tablas_soporte():
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # 🔥 Agregamos la columna 'leido' para las notificaciones estilo WhatsApp
+    try: cursor.execute("ALTER TABLE mensajes_chat ADD COLUMN leido INTEGER DEFAULT 0")
+    except Exception: pass
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS soporte (
             id_soporte INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,13 +66,13 @@ class MensajeChat(BaseModel):
 
 class TicketSoporte(BaseModel):
     id_usuario: int = 1
-    rol: str = "cliente" # 'cliente', 'repartidor', 'local'
+    rol: str = "cliente"
     id_pedido: int = 0
     mensaje: str
     evidencia: str = ""
 
 # ========================================================
-# 1. ENDPOINTS DE CHAT (LÓGICA DE UN CASO ÚNICO POR PEDIDO)
+# 1. ENDPOINTS DE CHAT (LÓGICA ESTILO WHATSAPP)
 # ========================================================
 @router.post("/api/chat/enviar_mensaje")
 @router.post("/enviar_mensaje_chat/")
@@ -76,6 +80,7 @@ def enviar_mensaje(req: MensajeChat):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
+    # Se inserta como no leído (leido = 0 por defecto)
     cursor.execute("""
         INSERT INTO mensajes_chat (id_pedido, remitente, mensaje, evidencia, canal) 
         VALUES (?, ?, ?, ?, ?)
@@ -85,6 +90,7 @@ def enviar_mensaje(req: MensajeChat):
     ticket = cursor.fetchone()
     
     if ticket:
+        # Reabrir ticket si mandan nuevo mensaje
         cursor.execute("""
             UPDATE soporte SET mensaje = ?, fecha = CURRENT_TIMESTAMP, estado = 'abierto' WHERE id_soporte = ?
         """, (req.mensaje, ticket[0]))
@@ -124,6 +130,13 @@ def obtener_historial_chat(id_pedido: int, canal: str = "admin_cliente"):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
+    # 🔥 MARCAR COMO LEÍDO AL ABRIR: Borra la burbuja roja del menú
+    cursor.execute("""
+        UPDATE mensajes_chat SET leido = 1 
+        WHERE id_pedido = ? AND remitente != 'Admin Central'
+    """, (id_pedido,))
+    conexion.commit()
+    
     cursor.execute("SELECT remitente, mensaje, evidencia, fecha, canal FROM mensajes_chat WHERE id_pedido = ? ORDER BY id_mensaje ASC", (id_pedido,))
     filas = cursor.fetchall()
     
@@ -136,7 +149,7 @@ def obtener_historial_chat(id_pedido: int, canal: str = "admin_cliente"):
     return {"status": "ok", "mensajes": mensajes}
 
 # ========================================================
-# 2. PANEL DE ADMINISTRACIÓN (RADIOGRAFÍA EXACTA CON ROL)
+# 2. PANEL DE ADMINISTRACIÓN (NOTIFICACIONES Y ORDENAMIENTO)
 # ========================================================
 @router.get("/api/admin/tickets_soporte")
 @router.get("/api/soporte/activos")
@@ -144,10 +157,10 @@ def ver_quejas_admin():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
-    # Consulta maestra robusta libre de errores de columnas faltantes
+    # 🔥 MAGIA SQL: Cuenta mensajes no leídos y ordena por la hora del último mensaje
     cursor.execute("""
         SELECT 
-            MAX(s.id_soporte), 
+            s.id_soporte, 
             s.id_pedido, 
             COALESCE(s.rol, 'cliente'), 
             s.mensaje, 
@@ -157,14 +170,16 @@ def ver_quejas_admin():
             COALESCE(u_cliente.nombre, 'Cliente Desconocido'),
             COALESCE(c_local.nombre_local, 'Sin Comercio'),
             COALESCE(u_motorista.nombre, 'Sin Motorista'),
-            '' as foto_perfil
+            COALESCE(u_cliente.telefono, c_local.telefono, u_motorista.telefono, '7777-7777') as telefono,
+            (SELECT COUNT(*) FROM mensajes_chat m WHERE m.id_pedido = s.id_pedido AND m.leido = 0 AND m.remitente != 'Admin Central') as mensajes_nuevos,
+            (SELECT MAX(fecha) FROM mensajes_chat m WHERE m.id_pedido = s.id_pedido) as ultima_actividad
         FROM soporte s
         LEFT JOIN pedidos p ON s.id_pedido = p.id_pedido
         LEFT JOIN usuarios u_cliente ON p.id_cliente = u_cliente.id_usuario
         LEFT JOIN comercios c_local ON p.id_comercio = c_local.id_comercio
         LEFT JOIN usuarios u_motorista ON p.id_repartidor = u_motorista.id_usuario
         GROUP BY s.id_pedido, s.rol
-        ORDER BY s.estado ASC, MAX(s.id_soporte) DESC
+        ORDER BY COALESCE(ultima_actividad, s.fecha) DESC
     """)
     filas = cursor.fetchall()
     conexion.close()
@@ -172,7 +187,7 @@ def ver_quejas_admin():
     return [{
         "id_ticket": r[0],
         "id_pedido": r[1],
-        "tipo_usuario": r[2], # Devuelve estrictamente 'cliente', 'repartidor' o 'local'
+        "tipo_usuario": r[2],
         "queja": r[3],
         "fecha": r[4],
         "estado": r[5],
@@ -180,7 +195,9 @@ def ver_quejas_admin():
         "nombre_cliente": r[7],
         "nombre_comercio": r[8],
         "nombre_repartidor": r[9],
-        "foto_perfil": r[10]
+        "telefono": r[10],
+        "mensajes_nuevos": r[11],
+        "ultima_actividad": r[12]
     } for r in filas]
 
 @router.post("/api/admin/resolver_ticket/{id_ticket}")
@@ -192,147 +209,131 @@ def resolver_ticket(id_ticket: int):
     conexion.close()
     return {"status": "ok", "mensaje": "Queja marcada como resuelta exitosamente."}
 
-# ========================================================
-# 3. NOTIFICACIONES GLOBALES (CAMPANITAS Y ALERTAS)
-# ========================================================
-@router.get("/api/admin/alertas_pendientes")
-def alertas_pendientes():
+# 🔥 ELIMINADOR NUCLEAR (BOTÓN ROJO)
+@router.post("/api/admin/eliminar_ticket/{id_ticket}")
+def eliminar_ticket_admin(id_ticket: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
-    cursor.execute("SELECT COUNT(DISTINCT id_pedido) FROM soporte WHERE estado = 'abierto'")
-    tickets_abiertos = cursor.fetchone()[0]
+    cursor.execute("SELECT id_pedido FROM soporte WHERE id_soporte = ?", (id_ticket,))
+    fila = cursor.fetchone()
     
-    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE estado = 'pendiente'")
-    usuarios_pendientes = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM comercios WHERE estado = 'pendiente'")
-    comercios_pendientes = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT COUNT(*) FROM pedidos WHERE estado NOT IN ('entregado', 'cancelado', 'archivado')")
-    pedidos_activos = cursor.fetchone()[0]
-    
-    conexion.close()
-    return {
-        "soporte": tickets_abiertos,
-        "aprobaciones": usuarios_pendientes + comercios_pendientes,
-        "radar": pedidos_activos
-    }
+    if fila:
+        id_pedido = fila[0]
+        # Destruye el chat y el ticket
+        cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (id_pedido,))
+        cursor.execute("DELETE FROM soporte WHERE id_soporte = ?", (id_ticket,))
+        conexion.commit()
+        conexion.close()
+        return {"status": "ok", "mensaje": "Chat y ticket eliminados por completo."}
+    else:
+        conexion.close()
+        return {"status": "error", "mensaje": "Ticket no encontrado"}
 
 # ========================================================
-# 4. DISTRIBUIDOR DE PUBLICIDAD PARA EL CONSUMIDOR
+# 3. NOTIFICACIONES GLOBALES (BURBUJAS ROJAS DEL MENÚ)
+# ========================================================
+@router.get("/api/admin/alertas_dashboard")
+def alertas_dashboard():
+    try:
+        conexion = sqlite3.connect(DB_PATH)
+        cursor = conexion.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM pedidos WHERE estado NOT IN ('entregado', 'cancelado', 'archivado')")
+        pedidos_activos = cursor.fetchone()[0]
+        
+        # Cuenta chats con mensajes sin leer
+        cursor.execute("SELECT COUNT(DISTINCT id_pedido) FROM mensajes_chat WHERE leido = 0 AND remitente != 'Admin Central'")
+        tickets_abiertos = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM usuarios WHERE estado = 'pendiente'")
+        usuarios_pendientes = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM comercios WHERE estado = 'pendiente'")
+        comercios_pendientes = cursor.fetchone()[0]
+        
+        conexion.close()
+        return {
+            "pedidos_activos": pedidos_activos, 
+            "cuentas_pendientes": usuarios_pendientes + comercios_pendientes, 
+            "tickets_abiertos": tickets_abiertos
+        }
+    except Exception as e:
+        return {"pedidos_activos": 0, "cuentas_pendientes": 0, "tickets_abiertos": 0}
+
+@router.get("/api/admin/alertas_pendientes")
+def alertas_pendientes():
+    # Mantenido por compatibilidad
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("SELECT COUNT(DISTINCT id_pedido) FROM soporte WHERE estado = 'abierto'")
+    tickets_abiertos = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE estado = 'pendiente'")
+    usuarios_pendientes = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM comercios WHERE estado = 'pendiente'")
+    comercios_pendientes = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM pedidos WHERE estado NOT IN ('entregado', 'cancelado', 'archivado')")
+    pedidos_activos = cursor.fetchone()[0]
+    conexion.close()
+    return {"soporte": tickets_abiertos, "aprobaciones": usuarios_pendientes + comercios_pendientes, "radar": pedidos_activos}
+
+# ========================================================
+# RESTO DEL CÓDIGO (ANUNCIOS, SEGUIMIENTO CLIENTE, SUBIDA MEDIA...)
 # ========================================================
 @router.get("/api/obtener_anuncio")
-@router.get("/api/obtener_anuncio/")
 def obtener_anuncio():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("SELECT mensaje, imagen_url FROM anuncios_globales ORDER BY id DESC LIMIT 1")
     anuncio = cursor.fetchone()
     conexion.close()
-    
-    if anuncio:
-        return {"status": "ok", "hay_anuncio": True, "mensaje": anuncio[0], "imagen_url": anuncio[1]}
+    if anuncio: return {"status": "ok", "hay_anuncio": True, "mensaje": anuncio[0], "imagen_url": anuncio[1]}
     return {"status": "ok", "hay_anuncio": False}
 
-# ========================================================
-# 5. SEGUIMIENTO DE TICKETS DEL CONSUMIDOR
-# ========================================================
 @router.get("/api/cliente/mis_tickets/{id_cliente}")
 def mis_tickets_cliente(id_cliente: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
     cursor.execute("""
-        SELECT 
-            MAX(s.id_soporte), 
-            p.id_pedido, 
-            s.estado, 
-            COALESCE(p.codigo_rastreo, 'CP-0000')
-        FROM soporte s
-        JOIN pedidos p ON s.id_pedido = p.id_pedido
-        WHERE p.id_cliente = ?
-        GROUP BY p.id_pedido
-        ORDER BY s.estado ASC, MAX(s.id_soporte) DESC
+        SELECT MAX(s.id_soporte), p.id_pedido, s.estado, COALESCE(p.codigo_rastreo, 'CP-0000')
+        FROM soporte s JOIN pedidos p ON s.id_pedido = p.id_pedido
+        WHERE p.id_cliente = ? GROUP BY p.id_pedido ORDER BY s.estado ASC, MAX(s.id_soporte) DESC
     """, (id_cliente,))
     filas = cursor.fetchall()
     conexion.close()
-    
-    return [{
-        "id_ticket": r[0],
-        "id_pedido": r[1],
-        "estado": r[2],
-        "codigo_rastreo": r[3]
-    } for r in filas]
+    return [{"id_ticket": r[0], "id_pedido": r[1], "estado": r[2], "codigo_rastreo": r[3]} for r in filas]
 
-# ========================================================
-# 6. LIMPIEZA DE CASOS RESUELTOS
-# ========================================================
 @router.post("/api/cliente/borrar_ticket/{id_pedido}")
 def borrar_ticket_cliente(id_pedido: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
     cursor.execute("DELETE FROM soporte WHERE id_pedido = ? AND estado = 'resuelto'", (id_pedido,))
     cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (id_pedido,))
-    
-    conexion.commit()
-    conexion.close()
-    return {"status": "ok", "mensaje": "Caso resuelto eliminado exitosamente"}
+    conexion.commit(); conexion.close()
+    return {"status": "ok", "mensaje": "Caso eliminado exitosamente"}
 
-# ========================================================
-# 7. VALIDACIÓN DE CÓDIGO DE RASTREO
-# ========================================================
 @router.get("/api/cliente/validar_rastreo/{codigo}")
 def validar_rastreo_cliente(codigo: str):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
     cursor.execute("SELECT id_pedido FROM pedidos WHERE codigo_rastreo = ?", (codigo,))
     fila = cursor.fetchone()
     conexion.close()
-    
-    if fila:
-        return {"status": "ok", "id_pedido": fila[0]}
+    if fila: return {"status": "ok", "id_pedido": fila[0]}
     return {"status": "error", "mensaje": "No se encontró ningún pedido con ese rastreo."}
 
-# ========================================================
-# 8. HISTORIAL DE PEDIDOS CON DETALLE DE RASTREO
-# ========================================================
 @router.get("/api/cliente/historial_detallado/{id_cliente}")
 def historial_detallado_cliente(id_cliente: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
     cursor.execute("""
-        SELECT 
-            p.id_pedido, 
-            COALESCE(p.codigo_rastreo, 'CP-0000'), 
-            p.estado, 
-            p.fecha, 
-            COALESCE(c.nombre_local, 'Comercio Local'), 
-            p.total
-        FROM pedidos p
-        LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
-        WHERE p.id_cliente = ?
-        ORDER BY p.id_pedido DESC
+        SELECT p.id_pedido, COALESCE(p.codigo_rastreo, 'CP-0000'), p.estado, p.fecha, COALESCE(c.nombre_local, 'Comercio Local'), p.total_pago
+        FROM pedidos p LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
+        WHERE p.id_cliente = ? ORDER BY p.id_pedido DESC
     """, (id_cliente,))
-    
     filas = cursor.fetchall()
     conexion.close()
-    
-    return [{
-        "id_pedido": r[0],
-        "codigo_rastreo": r[1],
-        "estado": r[2],
-        "fecha": r[3],
-        "nombre_local": r[4],
-        "total": r[5]
-    } for r in filas]
+    return [{"id_pedido": r[0], "codigo_rastreo": r[1], "estado": r[2], "fecha": r[3], "nombre_local": r[4], "total": r[5]} for r in filas]
 
-# ========================================================
-# 9. SUBIDA DE MULTIMEDIA (FOTOS Y AUDIOS DEL CHAT)
-# ========================================================
 MEDIA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "chat_media")
 os.makedirs(MEDIA_PATH, exist_ok=True)
 
@@ -342,10 +343,64 @@ async def subir_evidencia(archivo: UploadFile = File(...)):
         extension = archivo.filename.split(".")[-1]
         nuevo_nombre = f"{uuid.uuid4()}.{extension}"
         ruta_guardado = os.path.join(MEDIA_PATH, nuevo_nombre)
-        
         with open(ruta_guardado, "wb") as buffer:
             shutil.copyfileobj(archivo.file, buffer)
-            
         return {"status": "ok", "ruta": f"/static/chat_media/{nuevo_nombre}"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
+    # --- 1. OBTENER TICKETS DE SOPORTE PARA EL ADMIN (Conteo y Listado) ---
+@router.get("/api/admin/tickets_soporte")
+def admin_obtener_tickets():
+    conexion = sqlite3.connect(DB_PATH)
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    
+    cursor.execute("""
+        SELECT t.id_ticket, t.id_pedido, t.canal, t.queja, t.estado, t.fecha,
+               COALESCE(u.nombre, 'Usuario') AS nombre_cliente,
+               COALESCE(c.nombre_local, 'Comercio') AS nombre_comercio,
+               COALESCE(r.nombre, 'Motorista') AS nombre_repartidor,
+               u.foto_perfil
+        FROM soporte_tickets t
+        LEFT JOIN pedidos p ON t.id_pedido = p.id_pedido
+        LEFT JOIN usuarios u ON p.id_cliente = u.id_usuario
+        LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
+        LEFT JOIN usuarios r ON p.id_repartidor = r.id_usuario
+        ORDER BY t.id_ticket DESC
+    """)
+    tickets = [dict(row) for row in cursor.fetchall()]
+    conexion.close()
+    return tickets
+
+# --- 2. MARCAR TICKET COMO RESUELTO ---
+@router.post("/api/admin/resolver_ticket/{id_ticket}")
+def admin_resolver_ticket(id_ticket: int):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("UPDATE soporte_tickets SET estado = 'resuelto' WHERE id_ticket = ?", (id_ticket,))
+    conexion.commit()
+    conexion.close()
+    return {"status": "ok", "mensaje": "Ticket marcado como solucionado"}
+
+# --- 3. DESTRUIR CHAT Y TICKET POR COMPLETO (Botón Rojo Nuclear) ---
+@router.post("/api/admin/eliminar_ticket/{id_ticket}")
+def admin_eliminar_ticket(id_ticket: int):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    
+    # Buscamos el pedido y canal asociado para limpiar los mensajes del chat multimedia también
+    cursor.execute("SELECT id_pedido, canal FROM soporte_tickets WHERE id_ticket = ?", (id_ticket,))
+    info = cursor.fetchone()
+    
+    if info:
+        id_pedido, canal = info[0], info[1]
+        # Borramos los mensajes del chat real
+        cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ? AND canal = ?", (id_pedido, canal))
+        # Borramos el ticket de soporte
+        cursor.execute("DELETE FROM soporte_tickets WHERE id_ticket = ?", (id_ticket,))
+        conexion.commit()
+        conexion.close()
+        return {"status": "ok", "mensaje": "Chat y ticket eliminados por completo."}
+    
+    conexion.close()
+    return {"status": "error", "mensaje": "Ticket no encontrado"}

@@ -45,6 +45,8 @@ class _VistaConsumidorState extends State<VistaConsumidor> {
     // PESTAÑAS PRINCIPALES (Incluyendo la nueva pestaña de Soporte visible abajo)
     final vistas = [
       CliLocales(
+        idCliente: widget
+            .idCliente, // 🔥 AQUÍ ESTABA EL ERROR: Se le pasa el idCliente requerido
         onIrARastreo: () => setState(() {
           _indiceActual = 1;
           _hayPedidoActivo = true;
@@ -149,7 +151,10 @@ class _VistaConsumidorState extends State<VistaConsumidor> {
         final pagado = await showModalBottomSheet(
           context: context,
           isScrollControlled: true,
-          builder: (_) => CliCarrito(idComercio: widget.idCliente),
+          builder: (_) => CliCarrito(
+            idComercio: 1,
+            idCliente: widget.idCliente,
+          ),
         );
 
         if (!mounted) return;

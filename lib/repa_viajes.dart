@@ -68,6 +68,7 @@ class _RepaViajesState extends State<RepaViajes> {
   LatLng _ubicacionActual = const LatLng(13.7746, -89.0244);
   LatLng _ubicacionDestino = const LatLng(13.7746, -89.0244);
   Timer? _gpsTimerLocal;
+  Timer? _timerEstadoViaje; // 🔥 EL NUEVO MOTOR TURBO 🔥
 
   final MapController _mapController = MapController();
 
@@ -76,11 +77,17 @@ class _RepaViajesState extends State<RepaViajes> {
     super.initState();
     _cargarViajeVivo();
     _iniciarMonitoreoPosicion();
+
+    // 🔥 LATIDO SILENCIOSO: Revisa cambios cada 3 segundos (ej: PIN del Local)
+    _timerEstadoViaje = Timer.periodic(const Duration(seconds: 3), (_) {
+      _cargarViajeSilencioso();
+    });
   }
 
   @override
   void dispose() {
     _gpsTimerLocal?.cancel();
+    _timerEstadoViaje?.cancel(); // 🔥 Matamos el timer al salir
     super.dispose();
   }
 
@@ -109,6 +116,11 @@ class _RepaViajesState extends State<RepaViajes> {
 
   Future<void> _cargarViajeVivo() async {
     setState(() => _cargando = true);
+    await _cargarViajeSilencioso();
+  }
+
+  // 🔥 CARGA FLUIDA SIN MOSTRAR LA RUEDA MOLESTA
+  Future<void> _cargarViajeSilencioso() async {
     try {
       final res = await http.get(Uri.parse(
           '$urlCentral/api/viaje_activo/repartidor/${widget.idRepartidor}'));
@@ -139,18 +151,21 @@ class _RepaViajesState extends State<RepaViajes> {
           setState(() {
             _viaje = viajeData;
             _ubicacionDestino = LatLng(latDest, lonDest);
+            _cargando = false;
           });
 
           final int idPed = viajeData['id_pedido'] ?? 0;
           if (idPed > 0) GpsService.iniciarLatidosGps(idPed);
         } else {
-          setState(() => _viaje = null);
+          setState(() {
+            _viaje = null;
+            _cargando = false;
+          });
         }
       }
     } catch (e) {
-      debugPrint("Error cargando viaje: $e");
+      // Falla en silencio
     }
-    if (mounted) setState(() => _cargando = false);
   }
 
   String _calcularDistanciaYtiempoETA() {
@@ -452,7 +467,6 @@ class _RepaViajesState extends State<RepaViajes> {
               ),
             )
           else
-            // BOTÓN VERDE DE ENTREGA CON VALIDACIÓN ESTRICTA DE STATUS 'ok'
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
@@ -508,7 +522,6 @@ class _RepaViajesState extends State<RepaViajes> {
 
                             if (!context.mounted) return;
 
-                            // VERIFICACIÓN ESTRICTA: Solo cierra y apaga GPS si el server dice 'ok'[cite: 26]
                             if (data['status'] == 'ok') {
                               Navigator.pop(ctx);
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -519,7 +532,6 @@ class _RepaViajesState extends State<RepaViajes> {
                               GpsService.apagarGps();
                               _cargarViajeVivo();
                             } else {
-                              // SI ES ERROR, LA VENTANA SE QUEDA ABIERTA Y MUESTRA EL MENSAJE[cite: 26]
                               ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                       content: Text(

@@ -42,17 +42,14 @@ class _VistaRepartidorState extends State<VistaRepartidor> {
   @override
   void initState() {
     super.initState();
-    // 🔥 LLAMADA OBLIGATORIA AL ARRANCAR PARA FORZAR EL GPS EN ANDROID
     _verificarYPedirPermisosGPS();
   }
 
   Future<void> _verificarYPedirPermisosGPS() async {
     var status = await Permission.location.status;
     if (!status.isGranted) {
-      // Esto obliga a Android a desplegar la ventana de permisos de ubicación de inmediato
       var resultado = await Permission.location.request();
       if (resultado.isPermanentlyDenied) {
-        // Si el usuario lo denegó antes por completo, lo mandamos a los ajustes del teléfono
         openAppSettings();
       }
     }
@@ -230,7 +227,8 @@ class _RepaRadarState extends State<RepaRadar>
       _cargarBolsa();
     }
 
-    _temporizador = Timer.periodic(const Duration(seconds: 4), (timer) {
+    // 🔥 EL MOTOR TURBO A 2 SEGUNDOS 🔥
+    _temporizador = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (widget.radarActivo && mounted) {
         _obtenerMiGPS();
         _cargarBolsa();

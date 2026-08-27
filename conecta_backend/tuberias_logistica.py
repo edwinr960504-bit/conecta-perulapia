@@ -1,5 +1,5 @@
 # =====================================================================
-# ARCHIVO 2: tuberias_logistica.py (ACTUALIZADO CON ENDPOINT DE GPS)
+# ARCHIVO COMPLETO: tuberias_logistica.py (BLINDADO - SEPARACIÓN TOTAL)
 # PROPÓSITO: Bolsa de trabajo de Motoristas, GPS y Códigos PIN de entrega
 # =====================================================================
 from fastapi import APIRouter
@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import sqlite3
 import os
 from datetime import datetime
+from fastapi import Request
 
 router = APIRouter()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
@@ -24,11 +25,11 @@ class ActualizarGPS(BaseModel):
     latitud: float
     longitud: float
 
-# --- 1. BOLSA DE TRABAJO (Con Identidad y Número de Viaje) ---
 @router.get("/pedidos_disponibles")
 @router.get("/api/pedidos_disponibles")
 def bolsa_repartidores():
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
+    # Mercado libre: Solo se ven las órdenes que NO tienen dueño todavía
     cursor.execute("""
         SELECT p.id_pedido, p.descripcion, p.tarifa_envio, p.distancia_km, c.nombre_local, 
                c.direccion, p.estado, p.numero_diario, p.codigo_rastreo
@@ -44,29 +45,29 @@ def bolsa_repartidores():
         "numero_orden": r[7] or r[0], "codigo_rastreo": r[8] or f"CP-0000"
     } for r in filas]
 
-# --- 2. EL MOTORISTA ACEPTA EL VIAJE ---
 @router.post("/tomar_pedido")
 @router.post("/api/tomar_pedido")
 def repartidor_toma_pedido(req: TomarPedido):
+    if not req.id_repartidor or req.id_repartidor <= 0:
+        return {"status": "error", "mensaje": "Falla de identidad. Reinicia tu app."}
+        
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
+    # 🔥 CANDADO ATÓMICO: Asigna el pedido única y exclusivamente si estaba en cero. Si Carlos y Rafa tocan al mismo tiempo, solo entra uno.
     cursor.execute("""
         UPDATE pedidos SET estado = 'asignado', id_repartidor = ? 
-        WHERE id_pedido = ? AND id_repartidor = 0
+        WHERE id_pedido = ? AND (id_repartidor IS NULL OR id_repartidor = 0)
     """, (req.id_repartidor, req.id_pedido))
     filas = cursor.rowcount
     conexion.commit(); conexion.close()
     
-    if filas == 0: return {"status": "error", "mensaje": "Este pedido ya fue tomado por otro repartidor."}
-    return {"status": "ok", "mensaje": "¡Viaje asignado! Ve al restaurante por el pedido."}
-
-# --- 3. RECOLECCIÓN EN LOCAL ---
-from fastapi import Request
+    if filas == 0: 
+        return {"status": "error", "mensaje": "Viaje no disponible. Ya fue tomado por otro compañero."}
+    return {"status": "ok", "mensaje": "¡Viaje asignado y bloqueado para ti! Ve al restaurante."}
 
 @router.post("/recoger_pedido")
 @router.post("/api/recoger_pedido")
 async def recoger_en_local(request: Request):
     datos = await request.json()
-    
     id_orden = datos.get("id_pedido") or datos.get("id") or datos.get("orden_id")
     pin_ingresado = str(datos.get("pin") or datos.get("pin_recoleccion") or "").strip()
     
@@ -74,7 +75,6 @@ async def recoger_en_local(request: Request):
     cursor = conexion.cursor()
     cursor.execute("SELECT pin_recoleccion FROM pedidos WHERE id_pedido = ?", (id_orden,))
     row = cursor.fetchone()
-    
     pin_registrado = str(row[0]).strip() if row and row[0] is not None else ""
     
     if pin_registrado and pin_registrado != "None" and pin_ingresado != pin_registrado:
@@ -86,7 +86,6 @@ async def recoger_en_local(request: Request):
     conexion.close()
     return {"status": "ok", "mensaje": "¡PIN Correcto! El pedido va en camino al cliente."}
 
-# --- 4. ENTREGA AL CLIENTE ---
 @router.post("/entregar_pedido")
 @router.post("/api/entregar_pedido")
 def entregar_a_cliente(req: ValidarPin):
@@ -98,24 +97,20 @@ def entregar_a_cliente(req: ValidarPin):
         conexion.close(); return {"status": "error", "mensaje": "PIN de entrega incorrecto."}
     
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     cursor.execute("""
-        UPDATE pedidos 
-        SET estado = 'entregado', fecha_entrega = ? 
+        UPDATE pedidos SET estado = 'entregado', fecha_entrega = ? 
         WHERE id_pedido = ?
     """, (fecha_actual, req.id_pedido))
     
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": "¡Entrega completada! Dinero sumado a tu billetera."}
+    return {"status": "ok", "mensaje": "¡Entrega completada! Dinero sumado a tu billetera personal."}
     
-# --- 5. ACTUALIZACIÓN Y LECTURA DE GPS (MOTORISTA Y ADMIN) ---
 @router.post("/actualizar_gps")
 @router.post("/api/actualizar_gps")
 def gps_motorista(req: ActualizarGPS):
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     cursor.execute("""
-        UPDATE pedidos 
-        SET latitud_repartidor = ?, longitud_repartidor = ? 
+        UPDATE pedidos SET latitud_repartidor = ?, longitud_repartidor = ? 
         WHERE id_pedido = ?
     """, (req.latitud, req.longitud, req.id_pedido))
     conexion.commit(); conexion.close()
@@ -132,18 +127,18 @@ def obtener_gps_pedido(id_pedido: int):
     fila = cursor.fetchone()
     conexion.close()
     
-    if fila:
-        return {"status": "ok", "latitud": fila[0], "longitud": fila[1]}
+    if fila: return {"status": "ok", "latitud": fila[0], "longitud": fila[1]}
     return {"status": "error", "latitud": 0.0, "longitud": 0.0}
 
-# --- 6. BILLETERA DEL REPARTIDOR ---
 @router.get("/api/repartidor/billetera/{id_repartidor}")
 def obtener_billetera_repartidor(id_repartidor: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
+    # 🔥 REGLA DE 24 HORAS INDIVIDUAL: Extrae la fecha exacta actual del servidor
     hoy_str = datetime.now().strftime("%Y-%m-%d")
     
+    # 🔥 FILTRO ESTRICTO: Solo busca viajes propiedad de este motorista
     cursor.execute("""
         SELECT id_pedido, tarifa_envio, fecha_entrega 
         FROM pedidos 
@@ -164,6 +159,7 @@ def obtener_billetera_repartidor(id_repartidor: int):
         
         saldo_total += ganancia
         
+        # El sistema verifica independientemente que la fecha de entrega coincida con HOY
         if fecha_completa.startswith(hoy_str):
             ganancia_hoy += ganancia
             viajes_hoy += 1
@@ -189,15 +185,14 @@ def borrar_movimiento_repartidor(datos: dict):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_pedido = ?", (id_pedido,))
-    conexion.commit()
-    conexion.close()
-    return {"status": "ok", "mensaje": "Movimiento eliminado del historial"}
+    conexion.commit(); conexion.close()
+    return {"status": "ok", "mensaje": "Movimiento archivado de tu historial personal"}
 
 @router.post("/api/repartidor/limpiar_todo/{id_repartidor}")
 def limpiar_todo_repartidor(id_repartidor: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
+    # 🔥 LIMPIEZA PRIVADA: Solo borra los viajes que tengan exactamente su ID
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_repartidor = ? AND estado = 'entregado'", (id_repartidor,))
-    conexion.commit()
-    conexion.close()
-    return {"status": "ok", "mensaje": "Historial del motorista limpiado"}
+    conexion.commit(); conexion.close()
+    return {"status": "ok", "mensaje": "Historial personal limpiado con éxito"}

@@ -1,11 +1,11 @@
 # ========================================================
-# ARCHIVO: tuberias_negocio.py
-# PROPÓSITO: Gestión de comercios y menús con Escudo Anti-Null y Doble Llave para Flutter
+# ARCHIVO: tuberias_negocio.py (COMPLETO Y DEFINITIVO)
+# PROPÓSITO: Gestión de comercios, menús, logos persistentes y collage de platillos
 # ========================================================
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, UploadFile, File, Form
 import sqlite3
 import os
+import shutil
 from datetime import datetime
 
 router = APIRouter()
@@ -29,6 +29,8 @@ def reparar_tablas_negocio():
         except Exception: pass
         try: cursor.execute("ALTER TABLE comercios ADD COLUMN direccion TEXT DEFAULT 'Sin dirección'")
         except Exception: pass
+        try: cursor.execute("ALTER TABLE comercios ADD COLUMN horarios TEXT DEFAULT 'Sin horarios'")
+        except Exception: pass
         
         conn.commit()
         conn.close()
@@ -38,6 +40,8 @@ def reparar_tablas_negocio():
 reparar_tablas_negocio()
 
 # --- MODELOS DE DATOS ---
+from pydantic import BaseModel
+
 class ComercioNuevo(BaseModel):
     nombre_local: str
     telefono: str
@@ -59,17 +63,16 @@ class EstadoProducto(BaseModel):
     id_producto: int
     disponible: int
     precio: float
+    foto: str = None  
 
 class EliminarProducto(BaseModel):
     id_producto: int
 
 # ========================================================
-# 1. REGISTRO DE COMERCIOS (Anti-Duplicados)
+# 1. REGISTRO Y PERFIL DE COMERCIOS
 # ========================================================
 @router.post("/registrar_comercio")
 @router.post("/registrar_comercio/")
-@router.post("/reg_comercio")
-@router.post("/reg_comercio/")
 @router.post("/api/registrar_comercio")
 @router.post("/api/registrar_comercio/")
 def registrar_comercio(c: ComercioNuevo):
@@ -92,57 +95,128 @@ def registrar_comercio(c: ComercioNuevo):
     conexion.commit()
     conexion.close()
     
-    return {"status": "ok", "mensaje": f"Comercio '{c.nombre_local}' registrado. Pendiente de aprobación por la Central.", "id_comercio": id_nuevo}
+    return {"status": "ok", "mensaje": f"Comercio '{c.nombre_local}' registrado.", "id_comercio": id_nuevo}
+
+# 🔥 SUBIDA DE FOTO DE PERFIL DEL COMERCIO (GUARDA EN BD DE INMEDIATO)
+@router.post("/subir_foto_comercio/")
+@router.post("/subir_foto_comercio")
+@router.post("/api/subir_foto_comercio")
+@router.post("/api/subir_foto_comercio/")
+async def subir_foto_comercio(id_comercio: str = Form(...), file: UploadFile = File(...)):
+    ruta_carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fotos_seguridad")
+    os.makedirs(ruta_carpeta, exist_ok=True)
+    
+    nombre_archivo = f"local_{id_comercio}_{file.filename}"
+    ruta_destino = os.path.join(ruta_carpeta, nombre_archivo)
+    
+    with open(ruta_destino, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    url_relativa = f"/fotos_seguridad/{nombre_archivo}"
+    
+    # ACTUALIZACIÓN DIRECTA EN LA BASE DE DATOS
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("UPDATE comercios SET logo = ? WHERE id_comercio = ?", (url_relativa, id_comercio))
+    conexion.commit()
+    conexion.close()
+    
+    return {"status": "ok", "url": url_relativa}
+
+# 🔥 PERFIL INDIVIDUAL PARA CARGAR DATOS Y LOGO EN AJUSTES Y MENÚ LATERAL
+@router.get("/api/comercio/perfil/{id_comercio}")
+def obtener_perfil_comercio(id_comercio: int):
+    conexion = sqlite3.connect(DB_PATH)
+    conexion.row_factory = sqlite3.Row
+    cursor = conexion.cursor()
+    cursor.execute("""
+        SELECT id_comercio, nombre_local, direccion, horarios, logo, tipo_plan 
+        FROM comercios WHERE id_comercio = ?
+    """, (id_comercio,))
+    comercio = cursor.fetchone()
+    conexion.close()
+    
+    if comercio:
+        logo_path = comercio["logo"] if comercio["logo"] and comercio["logo"] != "Sin logo" else ""
+        return {
+            "status": "ok",
+            "id_comercio": comercio["id_comercio"],
+            "nombre_local": comercio["nombre_local"],
+            "direccion": comercio["direccion"] or "",
+            "horarios": comercio["horarios"] or "",
+            "logo": logo_path
+        }
+    return {"status": "error", "mensaje": "Comercio no encontrado"}
+
+@router.post("/api/comercio/actualizar_perfil")
+def actualizar_perfil_comercio(datos: dict):
+    id_comercio = datos.get('id_comercio')
+    nombre = datos.get('nombre_local')
+    direccion = datos.get('direccion')
+    horarios = datos.get('horarios')
+    
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("""
+        UPDATE comercios 
+        SET nombre_local = ?, direccion = ?, horarios = ? 
+        WHERE id_comercio = ?
+    """, (nombre, direccion, horarios, id_comercio))
+    conexion.commit()
+    conexion.close()
+    return {"status": "ok", "mensaje": "Perfil actualizado correctamente"}
 
 # ========================================================
-# 2. CONSULTA, EDICIÓN Y BORRADO DE MENÚS (Con Escudo Anti-Null)
+# 2. GESTIÓN DE FOTOGRAFÍAS Y MENÚS DE PLATILLOS
 # ========================================================
+@router.post("/subir_foto_producto")
+@router.post("/subir_foto_producto/")
+@router.post("/api/subir_foto_producto")
+@router.post("/api/subir_foto_producto/")
+async def subir_foto_producto(id_producto: int = Form(...), file: UploadFile = File(...)):
+    ruta_carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fotos_seguridad")
+    os.makedirs(ruta_carpeta, exist_ok=True)
+    
+    nombre_archivo = f"producto_{id_producto}_{file.filename}"
+    ruta_destino = os.path.join(ruta_carpeta, nombre_archivo)
+    
+    with open(ruta_destino, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    url_relativa = f"/fotos_seguridad/{nombre_archivo}"
+    
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("UPDATE productos SET foto_platillo = ? WHERE id_producto = ?", (url_relativa, id_producto))
+    conexion.commit()
+    conexion.close()
+    
+    return {"status": "ok", "url": url_relativa}
+
 @router.get("/productos_comercio/{id_comercio}")
 @router.get("/api/productos_comercio/{id_comercio}")
 def obtener_productos(id_comercio: str):
-    try:
-        id_limpio = int(id_comercio)
-    except ValueError:
-        return []
+    try: id_limpio = int(id_comercio)
+    except ValueError: return []
 
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("""
-        SELECT 
-            id_producto, 
-            COALESCE(nombre_producto, 'Platillo'), 
-            COALESCE(descripcion, 'Sin descripción'), 
-            COALESCE(precio, 0.0), 
-            COALESCE(foto_platillo, 'Sin foto'), 
-            COALESCE(disponible, 1)
-        FROM productos 
-        WHERE id_comercio = ?
-        ORDER BY disponible DESC, nombre_producto ASC
+        SELECT id_producto, COALESCE(nombre_producto, 'Platillo'), COALESCE(descripcion, 'Sin descripción'), 
+               COALESCE(precio, 0.0), COALESCE(foto_platillo, 'Sin foto'), COALESCE(disponible, 1)
+        FROM productos WHERE id_comercio = ? ORDER BY disponible DESC, nombre_producto ASC
     """, (id_limpio,))
-    
-    prods = cursor.fetchall()
-    conexion.close()
+    prods = cursor.fetchall(); conexion.close()
     
     return [{
-        "id": p[0],
-        "id_producto": p[0],
-        "nombre": p[1],
-        "nombre_producto": p[1],
-        "descripcion": p[2],
-        "precio": p[3],
-        "foto": p[4],
-        "foto_platillo": p[4],
-        "disponible": bool(p[5])
+        "id": p[0], "id_producto": p[0], "nombre": p[1], "nombre_producto": p[1],
+        "descripcion": p[2], "precio": p[3], "foto": p[4], "foto_platillo": p[4], "disponible": bool(p[5])
     } for p in prods]
 
 @router.post("/agregar_producto")
 @router.post("/agregar_producto/")
-@router.post("/registrar_producto")
-@router.post("/registrar_producto/")
 @router.post("/api/agregar_producto")
 @router.post("/api/agregar_producto/")
-@router.post("/api/registrar_producto")
-@router.post("/api/registrar_producto/")
 def agregar_producto(p: ProductoNuevo):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
@@ -150,11 +224,9 @@ def agregar_producto(p: ProductoNuevo):
         INSERT INTO productos (id_comercio, nombre_producto, descripcion, precio, foto_platillo, disponible) 
         VALUES (?, ?, ?, ?, ?, ?)
     """, (p.id_comercio, p.nombre_producto, p.descripcion, p.precio, p.foto_platillo, p.disponible))
-    
     id_prod = cursor.lastrowid
-    conexion.commit()
-    conexion.close()
-    return {"status": "ok", "mensaje": f"Platillo '{p.nombre_producto}' agregado al menú.", "id_producto": id_prod}
+    conexion.commit(); conexion.close()
+    return {"status": "ok", "mensaje": "Platillo agregado", "id_producto": id_prod}
 
 @router.post("/actualizar_producto")
 @router.post("/actualizar_producto/")
@@ -163,14 +235,12 @@ def agregar_producto(p: ProductoNuevo):
 def actualizar_producto(ep: EstadoProducto):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("""
-        UPDATE productos SET disponible = ?, precio = ? WHERE id_producto = ?
-    """, (ep.disponible, ep.precio, ep.id_producto))
-    
-    conexion.commit()
-    conexion.close()
-    estado_txt = "Disponible" if ep.disponible == 1 else "Agotado temporalmente"
-    return {"status": "ok", "mensaje": f"Platillo actualizado a: {estado_txt} ($ {ep.precio})"}
+    if ep.foto:
+        cursor.execute("UPDATE productos SET disponible = ?, precio = ?, foto_platillo = ? WHERE id_producto = ?", (ep.disponible, ep.precio, ep.foto, ep.id_producto))
+    else:
+        cursor.execute("UPDATE productos SET disponible = ?, precio = ? WHERE id_producto = ?", (ep.disponible, ep.precio, ep.id_producto))
+    conexion.commit(); conexion.close()
+    return {"status": "ok"}
 
 @router.post("/eliminar_producto")
 @router.post("/eliminar_producto/")
@@ -180,16 +250,11 @@ def eliminar_producto(del_req: EliminarProducto):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM productos WHERE id_producto = ?", (del_req.id_producto,))
-    filas = cursor.rowcount
-    conexion.commit()
-    conexion.close()
-    
-    if filas == 0:
-        return {"status": "error", "mensaje": "No se encontró el producto en la base de datos."}
-    return {"status": "ok", "mensaje": "Platillo eliminado correctamente del menú."}
+    conexion.commit(); conexion.close()
+    return {"status": "ok"}
 
 # ========================================================
-# 3. DIRECTORIO DE COMERCIOS ACTIVOS (Solo muestra los abiertos: estado = 'activo')
+# 3. DIRECTORIO DE COMERCIOS ACTIVOS (CON COLLAGE DE PLATILLOS)
 # ========================================================
 @router.get("/comercios_activos")
 @router.get("/comercios_activos/")
@@ -199,137 +264,53 @@ def comercios_activos():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("""
-        SELECT 
-            id_comercio, 
-            COALESCE(nombre_local, 'Comercio'), 
-            COALESCE(direccion, 'Sin dirección'), 
-            COALESCE(logo, 'Sin logo'), 
-            COALESCE(tipo_plan, 'comision') 
-        FROM comercios 
-        WHERE estado = 'activo'
-        ORDER BY nombre_local ASC
+        SELECT id_comercio, COALESCE(nombre_local, 'Comercio'), COALESCE(direccion, 'Sin dirección'), 
+               COALESCE(logo, 'Sin logo'), COALESCE(tipo_plan, 'comision') 
+        FROM comercios WHERE estado = 'activo' ORDER BY nombre_local ASC
     """)
     locales = cursor.fetchall()
+    
+    resultado = []
+    for l in locales:
+        id_com = l[0]
+        # Obtenemos hasta 3 fotos de los platillos para armar el fondo collage dinámico
+        cursor.execute("""
+            SELECT foto_platillo FROM productos 
+            WHERE id_comercio = ? AND foto_platillo != 'Sin foto' AND foto_platillo != ''
+            LIMIT 3
+        """, (id_com,))
+        fotos_prods = [row[0] for row in cursor.fetchall()]
+        
+        resultado.append({
+            "id": id_com,
+            "id_comercio": id_com,
+            "id_local": id_com,
+            "nombre": l[1],
+            "nombre_local": l[1],
+            "direccion": l[2],
+            "logo": l[3],
+            "tipo_plan": l[4],
+            "fotos_productos": fotos_prods
+        })
+        
     conexion.close()
-    
-    return [{
-        "id": l[0],
-        "id_comercio": l[0],
-        "id_local": l[0],
-        "nombre": l[1],
-        "nombre_local": l[1],
-        "direccion": l[2],
-        "logo": l[3],
-        "tipo_plan": l[4]
-    } for l in locales]
+    return resultado
 
-# ========================================================
-# 4. CANDADO DE SEGURIDAD: ABRIR / CERRAR LOCAL REAL
-# ========================================================
 @router.post("/api/comercio/estado/{id_comercio}")
-@router.post("/comercio/estado/{id_comercio}")
-@router.post("/comercio/cambiar_estado")
-@router.post("/api/comercio/cambiar_estado")
-def cambiar_estado_comercio_flexible(id_comercio: int, datos: dict):
-    # Traduce el interruptor (true/false) a los estados de la base de datos ('activo' o 'cerrado')
-    if "abierto" in datos:
-        nuevo_estado = "activo" if datos.get("abierto") else "cerrado"
-    else:
-        nuevo_estado = str(datos.get("estado", "activo")).lower().strip()
-    
+def cambiar_estado(id_comercio: int, datos: dict):
+    nuevo_estado = "activo" if datos.get("abierto") else "cerrado"
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
-    # REGLA DE ORO: Si intenta CERRAR, verifica si hay pedidos vivos en proceso
-    if nuevo_estado == "cerrado":
-        cursor.execute("""
-            SELECT COUNT(*) FROM pedidos 
-            WHERE id_comercio = ? AND estado IN ('pendiente', 'preparacion', 'listo_recoleccion', 'asignado')
-        """, (id_comercio,))
-        pedidos_vivos = cursor.fetchone()[0]
-        
-        if pedidos_vivos > 0:
-            conexion.close()
-            return {
-                "status": "error", 
-                "mensaje": f"¡No puedes cerrar el local! Tienes {pedidos_vivos} pedido(s) en proceso. Entrégalo o cancélalo primero."
-            }, 400
-            
-    # Actualiza el estado real en la columna 'estado' de la tabla comercios
     cursor.execute("UPDATE comercios SET estado = ? WHERE id_comercio = ?", (nuevo_estado, id_comercio))
-    conexion.commit()
-    conexion.close()
-    
-    return {
-        "status": "ok", 
-        "mensaje": f"Estado del negocio actualizado a: {nuevo_estado.upper()}",
-        "abierto": (nuevo_estado == "activo")
-    }
+    conexion.commit(); conexion.close()
+    return {"status": "ok", "abierto": (nuevo_estado == "activo")}
 
-# ========================================================
-# 5. BILLETERA Y FINANZAS DEL COMERCIO (En tiempo real)
-# ========================================================
 @router.get("/billetera/comercio/{id_comercio}")
 @router.get("/api/billetera/comercio/{id_comercio}")
 def billetera_comercio(id_comercio: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
-    cursor.execute("""
-        SELECT id_pedido, descripcion, total_pago, fecha_entrega 
-        FROM pedidos 
-        WHERE id_comercio = ? AND estado = 'entregado'
-        ORDER BY id_pedido DESC
-    """, (id_comercio,))
-    
-    filas = cursor.fetchall()
-    conexion.close()
-    
-    ganancia_total = 0.0
-    historial = []
-    
-    for r in filas:
-        id_ped = r[0]
-        desc = r[1] or "Pedido de comida"
-        monto = float(r[2] or 0.0)
-        
-        if monto <= 0.0:
-            monto = 5.00
-            
-        ganancia_total += monto
-        fecha_hora = r[3] or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        historial.append({
-            "id_pedido": id_ped,
-            "ganancia": round(monto, 2),
-            "fecha": fecha_hora,
-            "descripcion": desc
-        })
-        
-    return {
-        "ganancia_total": round(ganancia_total, 2),
-        "historial": historial
-    }
-# ========================================================
-# BORRAR MOVIMIENTOS DE LA BILLETERA / HISTORIAL
-# ========================================================
-@router.post("/api/billetera/borrar_movimiento")
-def borrar_movimiento_billetera(datos: dict):
-    id_pedido = datos.get("id_pedido")
-    conexion = sqlite3.connect(DB_PATH)
-    cursor = conexion.cursor()
-    # Marcamos el pedido como archivado para que ya no salga en la billetera
-    cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_pedido = ?", (id_pedido,))
-    conexion.commit()
-    conexion.close()
-    return {"status": "ok", "mensaje": f"Pedido {id_pedido} borrado del historial"}
-
-@router.post("/api/billetera/limpiar_todo/{id_comercio}")
-def limpiar_todo_billetera(id_comercio: int):
-    conexion = sqlite3.connect(DB_PATH)
-    cursor = conexion.cursor()
-    # Archiva todos los entregados de este comercio
-    cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_comercio = ? AND estado = 'entregado'", (id_comercio,))
-    conexion.commit()
-    conexion.close()
-    return {"status": "ok", "mensaje": "Historial limpiado con éxito"}
+    cursor.execute("SELECT id_pedido, descripcion, total_pago, fecha_entrega FROM pedidos WHERE id_comercio = ? AND estado = 'entregado' ORDER BY id_pedido DESC", (id_comercio,))
+    filas = cursor.fetchall(); conexion.close()
+    ganancia_total = sum([float(r[2] or 5.0) for r in filas])
+    return {"ganancia_total": round(ganancia_total, 2), "historial": [{"id_pedido": r[0], "ganancia": float(r[2] or 5.0), "fecha": r[3], "descripcion": r[1]} for r in filas]}

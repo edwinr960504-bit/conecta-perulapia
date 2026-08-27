@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart'; // <-- NUEVO: Para sacar el GPS
+import 'package:geolocator/geolocator.dart';
 import 'carrito_service.dart';
 
 class CliCarrito extends StatefulWidget {
   final int idComercio;
-  const CliCarrito({super.key, required this.idComercio});
+  final int idCliente; // 🔥 Atrapa la identidad real del consumidor
+  const CliCarrito({
+    super.key,
+    required this.idComercio,
+    required this.idCliente,
+  });
 
   @override
   State<CliCarrito> createState() => _CliCarritoState();
@@ -12,10 +17,8 @@ class CliCarrito extends StatefulWidget {
 
 class _CliCarritoState extends State<CliCarrito> {
   String metodoPago = "Efectivo";
-  bool _procesandoPedido =
-      false; // <-- Para bloquear el botón mientras saca el GPS
+  bool _procesandoPedido = false;
 
-  // 🔥 NUEVA FUNCIÓN: Obtener la posición exacta al momento de pedir
   Future<Position?> _obtenerUbicacionActual() async {
     try {
       LocationPermission permiso = await Geolocator.checkPermission();
@@ -168,7 +171,7 @@ class _CliCarritoState extends State<CliCarrito> {
             ),
           const SizedBox(height: 25),
 
-          // 🔥 BOTÓN INTELIGENTE: SACA EL GPS Y ENVÍA EL PEDIDO
+          // 🔥 BOTÓN INTELIGENTE: ENVÍA EL PEDIDO CON EL ID REAL DEL CLIENTE
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -180,8 +183,7 @@ class _CliCarritoState extends State<CliCarrito> {
             onPressed: (CarritoService.items.isEmpty || _procesandoPedido)
                 ? null
                 : () async {
-                    setState(
-                        () => _procesandoPedido = true); // Bloqueamos botón
+                    setState(() => _procesandoPedido = true);
 
                     final mensajero = ScaffoldMessenger.of(context);
                     final navegador = Navigator.of(context);
@@ -203,19 +205,16 @@ class _CliCarritoState extends State<CliCarrito> {
                       ),
                     );
 
-                    // 1. OBTENEMOS LA COORDENADA EN TIEMPO REAL
                     Position? pos = await _obtenerUbicacionActual();
-
-                    // Si el cliente no da permisos, se usa el centro de Perulapía por defecto
                     double latActual = pos?.latitude ?? 13.7333;
                     double lonActual = pos?.longitude ?? -89.1167;
 
-                    // 2. ENVIAMOS EL PEDIDO CON LAS COORDENADAS
+                    // 🔥 AQUÍ ESTÁ EL CAMBIO CLAVE: Se usa widget.idCliente en lugar del '1'
                     bool exito = await CarritoService.confirmarPedido(
-                      1, // ID Cliente (quemado por ahora, puedes volverlo dinámico después)
+                      widget.idCliente,
                       widget.idComercio,
                       metodoPago,
-                      1.5, // Distancia (se puede calcular automático a futuro)
+                      1.5,
                       latActual,
                       lonActual,
                     );

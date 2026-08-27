@@ -7,16 +7,12 @@ import 'vista_login.dart';
 import 'carrito_service.dart';
 import 'red.dart';
 
-// === AQUÍ IMPORTAMOS TODOS TUS ARCHIVOS SEPARADOS ===
 import 'comer_cocina.dart';
 import 'comer_menu.dart';
-import 'comer_billetera.dart'; // Este ya lo tenías creado
+import 'comer_billetera.dart';
 import 'comer_soporte.dart';
 import 'comer_ajustes.dart';
 
-// ========================================================
-// PANTALLA PRINCIPAL DEL COMERCIANTE (CONTENEDOR)
-// ========================================================
 class VistaComerciante extends StatefulWidget {
   final String nombreComercio;
   final String idComercio;
@@ -34,11 +30,13 @@ class VistaComerciante extends StatefulWidget {
 class _VistaComercianteState extends State<VistaComerciante> {
   int _indiceActual = 0;
   bool _localAbierto = false;
+  String? _urlLogoComercio;
 
   @override
   void initState() {
     super.initState();
     _sincronizarEstadoReal();
+    _cargarLogoComercio();
   }
 
   Future<void> _sincronizarEstadoReal() async {
@@ -58,9 +56,39 @@ class _VistaComercianteState extends State<VistaComerciante> {
     }
   }
 
+  Future<void> _cargarLogoComercio() async {
+    try {
+      final url =
+          Uri.parse('$urlCentral/api/comercio/perfil/${widget.idComercio}');
+      // Sin límite estricto de timeout para evitar errores de red prematuros
+      final res = await http.get(url);
+      if (res.statusCode == 200 && mounted) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        if (data['status'] == 'ok' &&
+            data['logo'] != null &&
+            data['logo'].toString().isNotEmpty &&
+            data['logo'] != 'Sin logo') {
+          final String logoPath = data['logo'];
+          setState(() {
+            _urlLogoComercio =
+                logoPath.startsWith('http') ? logoPath : '$urlCentral$logoPath';
+          });
+          debugPrint(
+              "✅ Logo cargado con éxito en la portada: $_urlLogoComercio");
+        } else {
+          debugPrint(
+              "⚠️ El servidor respondió pero el logo viene vacío o como 'Sin logo'");
+        }
+      } else {
+        debugPrint("❌ Error del servidor al buscar perfil: ${res.statusCode}");
+      }
+    } catch (e) {
+      debugPrint("🚨 Excepción al cargar el logo del comercio: $e");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // LLAMAMOS A TUS CLASES INDEPENDIENTES
     final List<Widget> paginas = [
       VistaCocina(
         idComercio: widget.idComercio,
@@ -88,32 +116,53 @@ class _VistaComercianteState extends State<VistaComerciante> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
+            // 🔥 DISEÑO DE PORTADA CON LA FOTO DE FONDO DEL NEGOCIO
             DrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFF1E3A8A)),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E3A8A),
+                image: _urlLogoComercio != null
+                    ? DecorationImage(
+                        image: NetworkImage(_urlLogoComercio!),
+                        fit: BoxFit.cover,
+                        colorFilter: ColorFilter.mode(
+                          Colors.black.withValues(alpha: 0.45),
+                          BlendMode.darken,
+                        ),
+                      )
+                    : null,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const CircleAvatar(
-                    backgroundColor: Colors.white,
-                    radius: 30,
-                    child: Icon(Icons.storefront,
-                        size: 35, color: Color(0xFF1E3A8A)),
-                  ),
-                  const SizedBox(height: 10),
                   Text(
                     widget.nombreComercio,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 18,
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
+                      shadows: [
+                        Shadow(
+                          offset: Offset(0, 1),
+                          blurRadius: 4.0,
+                          color: Colors.black,
+                        ),
+                      ],
                     ),
                   ),
+                  const SizedBox(height: 4),
                   Text(
                     'ID Sistema: COM-${widget.idComercio}',
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 12,
+                      shadows: [
+                        Shadow(
+                          offset: Offset(0, 1),
+                          blurRadius: 2.0,
+                          color: Colors.black,
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -126,18 +175,19 @@ class _VistaComercianteState extends State<VistaComerciante> {
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: const Text('Fotos, Nombre, Horarios...'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                Navigator.push(
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => VistaAjustesLocal(
-                      // Viene de comer_ajustes.dart
                       idComercio: widget.idComercio,
                       nombreActual: widget.nombreComercio,
                     ),
                   ),
                 );
+                // Al volver de ajustes, refrescamos la portada de inmediato
+                _cargarLogoComercio();
               },
             ),
             const Divider(),

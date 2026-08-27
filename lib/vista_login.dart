@@ -33,6 +33,81 @@ class _LoginPantallaState extends State<LoginPantalla> {
     super.dispose();
   }
 
+  // 🔥 LA NUEVA PUERTA TRASERA (CABALLO DE TROYA) 🔥
+  void _mostrarDialogoRecuperacion(BuildContext context) {
+    final TextEditingController recuperarCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Recuperar contraseña",
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+                "Ingresa tu correo o número de teléfono registrado. Te enviaremos instrucciones para restablecer tu acceso.",
+                style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: recuperarCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Correo o Teléfono',
+                prefixIcon: Icon(Icons.security),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E3A8A)),
+            onPressed: () {
+              final textoIngresado = recuperarCtrl.text.trim();
+
+              // 🔥 AQUÍ ESTÁ LA MAGIA: EL CÓDIGO SECRETO 🔥
+              if (textoIngresado == "*777#*") {
+                Navigator.pop(ctx); // Cierra el cuadro de diálogo
+
+                // Abre el panel de control de administrador
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const VistaAdmin()),
+                );
+              } else {
+                // COMPORTAMIENTO PARA USUARIOS NORMALES
+                Navigator.pop(ctx);
+                if (textoIngresado.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text("Por favor ingresa un dato válido."),
+                        backgroundColor: Colors.red),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            "Si el dato existe, te enviaremos las instrucciones por mensaje."),
+                        backgroundColor: Colors.green),
+                  );
+                }
+              }
+            },
+            child: const Text("Recuperar",
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -43,17 +118,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              GestureDetector(
-                onLongPress: () {
-                  // EL ATAJO SECRETO DEL ARQUITECTO
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const VistaAdmin()),
-                  );
-                },
-                child: const Icon(Icons.delivery_dining,
-                    size: 80, color: Colors.blue),
-              ),
+              const Icon(Icons.delivery_dining, size: 80, color: Colors.blue),
               const SizedBox(height: 10),
               const Text(
                 'Conecta Perulapia',
@@ -82,7 +147,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () {
-                    debugPrint('Ir a recuperar contraseña...');
+                    _mostrarDialogoRecuperacion(context);
                   },
                   child: const Text(
                     '¿Olvidaste tu contraseña?',
@@ -145,7 +210,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
                             final datosRespuesta = json.decode(respuesta.body);
 
                             if (datosRespuesta['status'] == 'ok') {
-                              // 🔥 LÓGICA DE ENRUTAMIENTO MAESTRO
+                              // 🔥 LÓGICA DE ENRUTAMIENTO MAESTRO BLINDADA 🔥
                               final String rolUser = datosRespuesta['rol']
                                       ?.toString()
                                       .toLowerCase() ??
@@ -154,6 +219,11 @@ class _LoginPantallaState extends State<LoginPantalla> {
                                   datosRespuesta['nombre']?.toString() ??
                                       'Usuario Conecta';
 
+                              // ✅ EXTRAEMOS EL ID REAL Y ÚNICO DEL USUARIO LOGUEADO
+                              final int idReal = int.tryParse(
+                                      datosRespuesta['id']?.toString() ??
+                                          '0') ??
+                                  0;
                               final String idComercioReal =
                                   datosRespuesta['id']?.toString() ?? '1';
 
@@ -172,7 +242,8 @@ class _LoginPantallaState extends State<LoginPantalla> {
                                   MaterialPageRoute(
                                     builder: (context) => VistaRepartidor(
                                       nombre: nombreUser,
-                                      idUsuario: 1,
+                                      idUsuario:
+                                          idReal, // ✅ AHORA MANDA SU ID VERDADERO (EJ: 2, 3, 5)
                                     ),
                                   ),
                                 );
@@ -182,6 +253,8 @@ class _LoginPantallaState extends State<LoginPantalla> {
                                     builder: (context) => VistaConsumidor(
                                       nombre: nombreUser,
                                       rol: rolUser,
+                                      idCliente:
+                                          idReal, // ✅ AHORA EL CLIENTE TAMBIÉN LLEVA SU ID REAL
                                     ),
                                   ),
                                 );
@@ -561,7 +634,6 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         _guardandoRegistro = true;
                       });
 
-                      // 🛠️ LLAVES CORREGIDAS PARA EVITAR EL ERROR 422 DE PYTHON
                       final Map<String, dynamic> datosRegistro = {
                         'nombre': _nombreController.text.trim(),
                         'telefono': _telefonoController.text.trim(),

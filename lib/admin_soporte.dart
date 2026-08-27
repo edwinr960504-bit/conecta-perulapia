@@ -62,11 +62,57 @@ class _AdminSoporteState extends State<AdminSoporte> {
       if (res.statusCode == 200 && mounted) {
         if (dialogContext.mounted) {
           Navigator.pop(dialogContext);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Ticket marcado como solucionado"),
+              backgroundColor: Colors.green));
         }
         _cargarTickets();
       }
     } catch (e) {
       debugPrint("Error al resolver: $e");
+    }
+  }
+
+  // 🔥 NUEVA FUNCIÓN: ELIMINAR EL TICKET Y EL CHAT DESDE LA RAÍZ 🔥
+  Future<void> _eliminarTicketYChat(
+      int idTicket, BuildContext dialogContext) async {
+    // Primero confirmamos
+    final confirmacion = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("⚠️ Eliminar Chat Completamente"),
+        content: const Text(
+            "¿Estás seguro? Esto borrará el ticket y todos los mensajes de este chat. Nadie podrá verlos nunca más."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancelar")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Sí, Destruir Todo",
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmacion == true) {
+      try {
+        final res = await http
+            .post(Uri.parse('$urlCentral/api/admin/eliminar_ticket/$idTicket'));
+        if (res.statusCode == 200 && mounted) {
+          if (dialogContext.mounted) {
+            Navigator.pop(dialogContext);
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text("Chat y ticket eliminados por completo"),
+                backgroundColor: Colors.orange));
+          }
+          _cargarTickets();
+        }
+      } catch (e) {
+        debugPrint("Error al eliminar el chat: $e");
+      }
     }
   }
 
@@ -104,7 +150,6 @@ class _AdminSoporteState extends State<AdminSoporte> {
 
   @override
   Widget build(BuildContext context) {
-    // Contadores para las tarjetas superiores (basados estrictamente en el rol del emisor)
     final int totalClientes =
         _tickets.where((t) => _obtenerTipoRol(t) == 'cliente').length;
     final int totalRepartidores =
@@ -112,22 +157,18 @@ class _AdminSoporteState extends State<AdminSoporte> {
     final int totalLocales =
         _tickets.where((t) => _obtenerTipoRol(t) == 'local').length;
 
-    // Filtrado avanzado combinado (Rol + Estado + Tipo de Incidencia: Pedido o Personal)
     final ticketsFiltrados = _tickets.where((t) {
       final estado = t['estado']?.toString() ?? 'abierto';
 
-      // 1. Filtro por Estado
       bool pasaEstado = true;
       if (_filtroEstado == 'abierto') pasaEstado = (estado == 'abierto');
       if (_filtroEstado == 'resuelto') pasaEstado = (estado == 'resuelto');
 
-      // 2. Filtro por Rol Superior (Clientes, Repartidores, Locales)
       bool pasaRol = true;
       if (_filtroRol != 'todos') {
         pasaRol = (_obtenerTipoRol(t) == _filtroRol);
       }
 
-      // 3. Filtro por Tipo de Incidencia (Pedidos vs. Personal)
       bool pasaTipo = true;
       final bool personal = _esPersonal(t);
       if (_filtroTipoIncidencia == 'pedido') pasaTipo = !personal;
@@ -167,7 +208,6 @@ class _AdminSoporteState extends State<AdminSoporte> {
                 )
               : Column(
                   children: [
-                    // CONTADORES SUPERIORES POR ROL
                     Container(
                       padding: const EdgeInsets.symmetric(
                           vertical: 14, horizontal: 10),
@@ -208,8 +248,6 @@ class _AdminSoporteState extends State<AdminSoporte> {
                       ),
                     ),
                     const Divider(height: 1),
-
-                    // SUB-FILTROS DE TIPO DE INCIDENCIA (Todo, Por Pedido, Personal)
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
@@ -243,8 +281,6 @@ class _AdminSoporteState extends State<AdminSoporte> {
                       ),
                     ),
                     const Divider(height: 1),
-
-                    // BOTONES DE FILTRO INFERIOR DE ESTADO (Todos, Pendientes, Solucionados)
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 10),
@@ -277,8 +313,6 @@ class _AdminSoporteState extends State<AdminSoporte> {
                         ],
                       ),
                     ),
-
-                    // LISTA DE TICKETS
                     Expanded(
                       child: ticketsFiltrados.isEmpty
                           ? const Center(
@@ -543,6 +577,10 @@ class _AdminSoporteState extends State<AdminSoporte> {
                                                           onResolver: (id) =>
                                                               _resolverTicket(
                                                                   id, context),
+                                                          onEliminar: (id) =>
+                                                              _eliminarTicketYChat(
+                                                                  id,
+                                                                  context), // 🔥 LE PASAMOS LA FUNCIÓN
                                                         ),
                                                       ),
                                                     ).then((_) =>
@@ -588,7 +626,6 @@ class _AdminSoporteState extends State<AdminSoporte> {
   }
 }
 
-// Widget pequeño para los chips de selección "Pedido" vs "Personal"
 class _ChipFiltroTipo extends StatelessWidget {
   final String label;
   final bool seleccionado;
@@ -734,11 +771,13 @@ class _BotonFiltro extends StatelessWidget {
 class DetalleTicketScreen extends StatelessWidget {
   final Map<dynamic, dynamic> ticket;
   final Function(int) onResolver;
+  final Function(int) onEliminar; // 🔥 RECIBIMOS LA FUNCIÓN DE ELIMINAR
 
   const DetalleTicketScreen({
     super.key,
     required this.ticket,
     required this.onResolver,
+    required this.onEliminar,
   });
 
   @override
@@ -880,25 +919,8 @@ class DetalleTicketScreen extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 24),
-            if (esAbierto) ...[
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 2,
-                ),
-                icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-                label: const Text("Marcar como Solucionado",
-                    style:
-                        TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                onPressed: () =>
-                    onResolver(idTicket), // <--- Llamado directo sin "widget."
-              ),
-              const SizedBox(height: 12),
-            ],
+
+            // 🔥 BOTÓN AZUL (Ir al chat)
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1E3A8A),
@@ -925,6 +947,43 @@ class DetalleTicketScreen extends StatelessWidget {
                   ),
                 );
               },
+            ),
+            const SizedBox(height: 12),
+
+            // 🔥 BOTÓN VERDE (Resolver)
+            if (esAbierto) ...[
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  elevation: 2,
+                ),
+                icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+                label: const Text("Marcar como Solucionado",
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                onPressed: () => onResolver(idTicket),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // 🔥 BOTÓN ROJO NUCLEAR (Eliminar ticket y todo el chat)
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade600,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                elevation: 2,
+              ),
+              icon: const Icon(Icons.delete_forever_rounded, size: 20),
+              label: const Text("Eliminar Chat y Ticket",
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              onPressed: () => onEliminar(idTicket),
             ),
           ],
         ),

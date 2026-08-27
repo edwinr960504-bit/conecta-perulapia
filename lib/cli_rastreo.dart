@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart'; // 🔥 Importamos para calcular distancia
+import 'package:latlong2/latlong.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'red.dart';
@@ -74,20 +74,30 @@ class CliRastreo extends StatefulWidget {
 }
 
 class _CliRastreoState extends State<CliRastreo> {
-  late Future<List<dynamic>> _pedidosFuture;
+  List<dynamic> _listaPedidos = [];
+  bool _cargando = true;
+
   Timer? _latidosClienteTimer;
-  LatLng?
-      _miUbicacionReal; // 🔥 Guardamos el GPS del cliente para calcular el tiempo
+  Timer? _timerMonitoreoPedidos; // 🔥 EL NUEVO MOTOR AUTOMÁTICO
+
+  LatLng? _miUbicacionReal;
 
   @override
   void initState() {
     super.initState();
-    _pedidosFuture = _obtenerPedidos();
+    _cargarPedidosSilencioso();
+
+    // 🔥 LATIDO: Trae los cambios de estado automáticamente cada 4 seg
+    _timerMonitoreoPedidos =
+        Timer.periodic(const Duration(seconds: 4), (timer) {
+      _cargarPedidosSilencioso();
+    });
   }
 
   @override
   void dispose() {
     _latidosClienteTimer?.cancel();
+    _timerMonitoreoPedidos?.cancel();
     super.dispose();
   }
 
@@ -131,7 +141,8 @@ class _CliRastreoState extends State<CliRastreo> {
     });
   }
 
-  Future<List<dynamic>> _obtenerPedidos() async {
+  // 🔥 NUEVA FUNCIÓN DE CARGA FLUIDA SIN BLOQUEAR LA PANTALLA
+  Future<void> _cargarPedidosSilencioso() async {
     final url = Uri.parse(
         '$urlCentral/api/pedidos_activos/cliente/${widget.idCliente}');
     try {
@@ -150,31 +161,29 @@ class _CliRastreoState extends State<CliRastreo> {
 
         if (listaOrdenada.isNotEmpty) {
           final int primerIdPedido = listaOrdenada.first['id_pedido'] ?? 0;
-          if (primerIdPedido > 0) {
+          if (primerIdPedido > 0 && _latidosClienteTimer == null) {
             _iniciarLatidosCliente(primerIdPedido);
           }
         } else {
           _latidosClienteTimer?.cancel();
+          _latidosClienteTimer = null;
         }
 
         if (widget.onEstadoPedidos != null) {
           widget.onEstadoPedidos!(listaOrdenada.isNotEmpty);
         }
-        return listaOrdenada;
+
+        if (mounted) {
+          setState(() {
+            _listaPedidos = listaOrdenada;
+            _cargando = false;
+          });
+        }
       }
     } catch (e) {
       debugPrint("Error rastreo: $e");
+      if (mounted) setState(() => _cargando = false);
     }
-
-    _latidosClienteTimer?.cancel();
-    if (widget.onEstadoPedidos != null) widget.onEstadoPedidos!(false);
-    return [];
-  }
-
-  Future<void> _refrescarRastreo() async {
-    setState(() {
-      _pedidosFuture = _obtenerPedidos();
-    });
   }
 
   Future<void> _cancelarPedido(int idPedido) async {
@@ -211,7 +220,8 @@ class _CliRastreoState extends State<CliRastreo> {
                 backgroundColor: Colors.orange),
           );
           _latidosClienteTimer?.cancel();
-          _refrescarRastreo();
+          _latidosClienteTimer = null;
+          _cargarPedidosSilencioso();
         }
       } catch (e) {
         debugPrint("Error al cancelar: $e");
@@ -228,201 +238,201 @@ class _CliRastreoState extends State<CliRastreo> {
         backgroundColor: const Color(0xFF0055A4),
         foregroundColor: Colors.white,
       ),
-      body: FutureBuilder<List<dynamic>>(
-        future: _pedidosFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(
-                child: CircularProgressIndicator(color: Color(0xFF0055A4)));
-          }
-
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: _refrescarRastreo,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: const [
-                  SizedBox(height: 150),
-                  Icon(Icons.delivery_dining, size: 80, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Center(
-                      child: Text("No tienes pedidos activos en este momento.",
-                          style: TextStyle(fontSize: 16, color: Colors.grey))),
-                  Center(
-                      child: Text("Desliza hacia abajo para actualizar.",
-                          style: TextStyle(fontSize: 12, color: Colors.grey))),
-                ],
-              ),
-            );
-          }
-
-          final listaPedidos = snapshot.data!;
-
-          return RefreshIndicator(
-            onRefresh: _refrescarRastreo,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: listaPedidos.length,
-              itemBuilder: (context, index) {
-                final p = listaPedidos[index];
-                final estadoCodigo = p['estado_codigo'] ?? '';
-
-                final int numCompra = p['numero_orden'] ?? p['id_pedido'] ?? 0;
-                final bool enCamino =
-                    (p['en_camino'] == true || estadoCodigo == 'en_camino');
-
-                // 🔥 CÁLCULO DE TIEMPO DE LLEGADA EN LA TARJETA 🔥
-                String textoLlegadaExtra = "";
-                if (enCamino &&
-                    _miUbicacionReal != null &&
-                    p['lat'] != null &&
-                    p['lon'] != null) {
-                  double latRep = double.tryParse(p['lat'].toString()) ?? 0.0;
-                  double lonRep = double.tryParse(p['lon'].toString()) ?? 0.0;
-
-                  if (latRep != 0.0 && lonRep != 0.0) {
-                    const Distance dist = Distance();
-                    double km = dist.as(LengthUnit.Meter, _miUbicacionReal!,
-                            LatLng(latRep, lonRep)) /
-                        1000;
-                    int minutos = (km * 3).ceil();
-                    textoLlegadaExtra = " • Llega en aprox. $minutos min";
-                  }
-                }
-
-                return Card(
-                  elevation: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                const CircleAvatar(
-                                  backgroundColor: Color(0xFF0055A4),
-                                  child: Icon(Icons.receipt_long,
-                                      color: Colors.white),
-                                ),
-                                const SizedBox(width: 12),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "Mi Compra del Día #$numCompra",
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 18),
-                                    ),
-                                    Text(
-                                      "Serial: ${p['codigo_rastreo'] ?? 'CP-0000'}",
-                                      style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.blueGrey),
-                                    ),
-                                    Text(
-                                      "${p['fecha'] ?? 'Hoy'}",
-                                      style: const TextStyle(
-                                          fontSize: 12, color: Colors.grey),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                const Text("PIN",
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.grey,
-                                        fontWeight: FontWeight.bold)),
-                                Text(
-                                  "${p['pin_seguridad'] ?? '---'}",
-                                  style: const TextStyle(
-                                      fontSize: 20,
-                                      color: Colors.red,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 2),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 24),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue.shade200),
-                          ),
+      body: _cargando && _listaPedidos.isEmpty
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF0055A4)))
+          : _listaPedidos.isEmpty
+              ? RefreshIndicator(
+                  onRefresh: _cargarPedidosSilencioso,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: const [
+                      SizedBox(height: 150),
+                      Icon(Icons.delivery_dining, size: 80, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Center(
                           child: Text(
-                            "${p['estado']}$textoLlegadaExtra", // 🔥 AQUÍ LE SUMAMOS EL TIEMPO
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF0055A4),
-                                fontSize: 14),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // 🔥 BOTÓN PARPADEANTE MÁGICO 🔥
-                        if (enCamino)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: BotonMapaParpadeante(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => MapaConsumidorScreen(
-                                      idPedido: p['id_pedido'],
-                                      codigoRastreo:
-                                          p['codigo_rastreo'] ?? 'CP-0000',
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                                "Total a pagar: \$${double.parse((p['total'] ?? 0).toString()).toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 16)),
-                            if (estadoCodigo == 'pendiente')
-                              IconButton(
-                                onPressed: () =>
-                                    _cancelarPedido(p['id_pedido']),
-                                icon: const Icon(Icons.delete_outline,
-                                    color: Colors.red, size: 26),
-                                tooltip: "Eliminar pedido",
-                                constraints: const BoxConstraints(),
-                                padding: EdgeInsets.zero,
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
+                              "No tienes pedidos activos en este momento.",
+                              style:
+                                  TextStyle(fontSize: 16, color: Colors.grey))),
+                      Center(
+                          child: Text(
+                              "Buscando actualizaciones automáticamente...",
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.grey))),
+                    ],
                   ),
-                );
-              },
-            ),
-          );
-        },
-      ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _cargarPedidosSilencioso,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _listaPedidos.length,
+                    itemBuilder: (context, index) {
+                      final p = _listaPedidos[index];
+                      final estadoCodigo = p['estado_codigo'] ?? '';
+
+                      final int numCompra =
+                          p['numero_orden'] ?? p['id_pedido'] ?? 0;
+                      final bool enCamino = (p['en_camino'] == true ||
+                          estadoCodigo == 'en_camino');
+
+                      String textoLlegadaExtra = "";
+                      if (enCamino &&
+                          _miUbicacionReal != null &&
+                          p['lat'] != null &&
+                          p['lon'] != null) {
+                        double latRep =
+                            double.tryParse(p['lat'].toString()) ?? 0.0;
+                        double lonRep =
+                            double.tryParse(p['lon'].toString()) ?? 0.0;
+
+                        if (latRep != 0.0 && lonRep != 0.0) {
+                          const Distance dist = Distance();
+                          double km = dist.as(LengthUnit.Meter,
+                                  _miUbicacionReal!, LatLng(latRep, lonRep)) /
+                              1000;
+                          int minutos = (km * 3).ceil();
+                          textoLlegadaExtra = " • Llega en aprox. $minutos min";
+                        }
+                      }
+
+                      return Card(
+                        elevation: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const CircleAvatar(
+                                        backgroundColor: Color(0xFF0055A4),
+                                        child: Icon(Icons.receipt_long,
+                                            color: Colors.white),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            "Mi Compra del Día #$numCompra",
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 18),
+                                          ),
+                                          Text(
+                                            "Serial: ${p['codigo_rastreo'] ?? 'CP-0000'}",
+                                            style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.blueGrey),
+                                          ),
+                                          Text(
+                                            "${p['fecha'] ?? 'Hoy'}",
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      const Text("PIN",
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey,
+                                              fontWeight: FontWeight.bold)),
+                                      Text(
+                                        "${p['pin_seguridad'] ?? '---'}",
+                                        style: const TextStyle(
+                                            fontSize: 20,
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 2),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 24),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border:
+                                      Border.all(color: Colors.blue.shade200),
+                                ),
+                                child: Text(
+                                  "${p['estado']}$textoLlegadaExtra",
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF0055A4),
+                                      fontSize: 14),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              if (enCamino)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: BotonMapaParpadeante(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              MapaConsumidorScreen(
+                                            idPedido: p['id_pedido'],
+                                            codigoRastreo:
+                                                p['codigo_rastreo'] ??
+                                                    'CP-0000',
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                      "Total a pagar: \$${double.parse((p['total'] ?? 0).toString()).toStringAsFixed(2)}",
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16)),
+                                  if (estadoCodigo == 'pendiente')
+                                    IconButton(
+                                      onPressed: () =>
+                                          _cancelarPedido(p['id_pedido']),
+                                      icon: const Icon(Icons.delete_outline,
+                                          color: Colors.red, size: 26),
+                                      tooltip: "Eliminar pedido",
+                                      constraints: const BoxConstraints(),
+                                      padding: EdgeInsets.zero,
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
     );
   }
 }

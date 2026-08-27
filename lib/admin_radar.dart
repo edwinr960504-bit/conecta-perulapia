@@ -38,7 +38,8 @@ class _AdminRadarState extends State<AdminRadar> {
 
   Future<void> _matarPedidoFantasma(int idPedido) async {
     final res = await http.post(
-      Uri.parse('$urlCentral/api/cancelar_pedido/'),
+      // 🔥 CORREGIDO: Se eliminó la pleca (/) al final de cancelar_pedido
+      Uri.parse('$urlCentral/api/cancelar_pedido'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'id_pedido': idPedido}),
     );

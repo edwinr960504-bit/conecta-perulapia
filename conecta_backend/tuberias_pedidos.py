@@ -1,5 +1,5 @@
 # =====================================================================
-# ARCHIVO COMPLETO: tuberias_pedidos.py (CONTADORES + GPS CLIENTE Y RUTA)
+# ARCHIVO COMPLETO: tuberias_pedidos.py (BLINDADO)
 # =====================================================================
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -34,7 +34,7 @@ def asegurar_estructura():
 asegurar_estructura()
 
 class PedidoNuevo(BaseModel):
-    id_cliente: int = 1
+    id_cliente: int  # 🔥 ELIMINADO EL "= 1". Si la app no manda quién es, el pedido no se contamina en el perfil de otro.
     id_comercio: int = None
     comercio_id: int = None
     id_local: int = None
@@ -120,7 +120,6 @@ def crear_pedido(p: PedidoNuevo):
 def ver_pedidos_cocina(id_comercio: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
     cursor.execute("""
         SELECT p.id_pedido, p.descripcion, p.precio_comida, p.total_pago, p.estado, p.fecha,
                COALESCE(u.nombre, 'Cliente Conecta'), COALESCE(u.telefono, 'Sin teléfono'), 
@@ -174,7 +173,6 @@ def comercio_pedido_listo(req: AccionComercio):
 def radar_del_cliente(id_cliente: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
     cursor.execute("""
         SELECT p.id_pedido, p.estado, p.pin_seguridad, p.latitud_repartidor, p.longitud_repartidor, p.total_pago,
                COALESCE(c.nombre_local, 'Comercio Local'), COALESCE(u_rep.nombre, ''), COALESCE(u_rep.telefono, ''),
@@ -253,13 +251,8 @@ class CoordenadasGPS(BaseModel):
 def actualizar_gps(c: CoordenadasGPS):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("""
-        UPDATE pedidos 
-        SET latitud_repartidor = ?, longitud_repartidor = ? 
-        WHERE id_pedido = ?
-    """, (c.latitud, c.longitud, c.id_pedido))
-    conexion.commit()
-    conexion.close()
+    cursor.execute("UPDATE pedidos SET latitud_repartidor = ?, longitud_repartidor = ? WHERE id_pedido = ?", (c.latitud, c.longitud, c.id_pedido))
+    conexion.commit(); conexion.close()
     return {"status": "ok", "mensaje": "Ubicación actualizada con éxito"}
 
 @router.post("/actualizar_gps_cliente")
@@ -269,52 +262,25 @@ def actualizar_gps(c: CoordenadasGPS):
 def actualizar_gps_cliente(c: CoordenadasGPS):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("""
-        UPDATE pedidos 
-        SET latitud_cliente = ?, longitud_cliente = ? 
-        WHERE id_pedido = ?
-    """, (c.latitud, c.longitud, c.id_pedido))
-    conexion.commit()
-    conexion.close()
+    cursor.execute("UPDATE pedidos SET latitud_cliente = ?, longitud_cliente = ? WHERE id_pedido = ?", (c.latitud, c.longitud, c.id_pedido))
+    conexion.commit(); conexion.close()
     return {"status": "ok", "mensaje": "Ubicación del cliente actualizada en tiempo real"}
 
-# --- 🔥 ENDPOINT MÁGICO PARA EL AUTO-CIERRE DEL CLIENTE ---
 @router.get("/api/obtener_gps/{id_pedido}")
 def obtener_gps(id_pedido: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("""
-        SELECT latitud_repartidor, longitud_repartidor, latitud_cliente, longitud_cliente, estado 
-        FROM pedidos WHERE id_pedido = ?
-    """, (id_pedido,))
+    cursor.execute("SELECT latitud_repartidor, longitud_repartidor, latitud_cliente, longitud_cliente, estado FROM pedidos WHERE id_pedido = ?", (id_pedido,))
     row = cursor.fetchone()
     conexion.close()
     
     if row:
         return {
-            "status": "ok",
-            "latitud_repartidor": row[0] or 0.0,
-            "longitud_repartidor": row[1] or 0.0,
-            "latitud": row[0] or 0.0,
-            "longitud": row[1] or 0.0,
-            "latitud_cliente": row[2] or 13.7333,
-            "longitud_cliente": row[3] or -89.1167,
-            "latitud_comercio": 13.7333,
-            "longitud_comercio": -89.1167,
-            "estado_pedido": row[4]
+            "status": "ok", "latitud_repartidor": row[0] or 0.0, "longitud_repartidor": row[1] or 0.0,
+            "latitud": row[0] or 0.0, "longitud": row[1] or 0.0, "latitud_cliente": row[2] or 13.7333,
+            "longitud_cliente": row[3] or -89.1167, "latitud_comercio": 13.7333, "longitud_comercio": -89.1167, "estado_pedido": row[4]
         }
-    return {
-        "status": "error", 
-        "latitud_repartidor": 0.0, 
-        "longitud_repartidor": 0.0,
-        "latitud": 0.0,
-        "longitud": 0.0,
-        "latitud_cliente": 13.7333,
-        "longitud_cliente": -89.1167,
-        "latitud_comercio": 13.7333,
-        "longitud_comercio": -89.1167,
-        "estado_pedido": "desconocido"
-    }
+    return {"status": "error", "estado_pedido": "desconocido"}
 
 @router.post("/api/cancelar_pedido/{id_pedido}")
 def cancelar_pedido(id_pedido: int):

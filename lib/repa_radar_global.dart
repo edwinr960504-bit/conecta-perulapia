@@ -39,7 +39,7 @@ class _RadarGlobalScreenState extends State<RadarGlobalScreen>
     )..repeat(reverse: true);
 
     _escanearRadar();
-    _timerRadar = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _timerRadar = Timer.periodic(const Duration(seconds: 4), (timer) {
       _escanearRadar();
     });
   }

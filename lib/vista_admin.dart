@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:async';
+import 'red.dart';
 
-// Importamos los submódulos de la central asignando un prefijo a soporte para evitar choques
 import 'admin_radar.dart';
 import 'admin_directorio.dart';
 import 'admin_finanzas.dart';
@@ -16,9 +19,50 @@ class VistaAdmin extends StatefulWidget {
 }
 
 class _VistaAdminState extends State<VistaAdmin> {
+  int _pedidosActivos = 0;
+  int _cuentasPendientes = 0;
+  int _ticketsPendientes = 0;
+  Timer? _timerNotificaciones;
+
+  @override
+  void initState() {
+    super.initState();
+    _obtenerAlertasGlobales();
+    // 🔥 LATIDO: Actualiza las 3 notificaciones cada 4 segundos
+    _timerNotificaciones = Timer.periodic(const Duration(seconds: 4), (_) {
+      _obtenerAlertasGlobales();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timerNotificaciones?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _obtenerAlertasGlobales() async {
+    try {
+      final res =
+          await http.get(Uri.parse('$urlCentral/api/admin/alertas_dashboard'));
+      if (res.statusCode == 200 && mounted) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        setState(() {
+          _pedidosActivos = data['pedidos_activos'] ?? 0;
+          _cuentasPendientes = data['cuentas_pendientes'] ?? 0;
+          _ticketsPendientes = data['tickets_abiertos'] ?? 0;
+        });
+      }
+    } catch (e) {
+      // Falla silenciosa
+    }
+  }
+
   void _abrirModulo(BuildContext context, Widget pantallaDestino) {
     Navigator.push(
-        context, MaterialPageRoute(builder: (context) => pantallaDestino));
+            context, MaterialPageRoute(builder: (context) => pantallaDestino))
+        .then((_) {
+      _obtenerAlertasGlobales();
+    });
   }
 
   @override
@@ -44,6 +88,7 @@ class _VistaAdminState extends State<VistaAdmin> {
               subtitulo: "Seguimiento en vivo",
               icono: Icons.radar,
               color: Colors.blue.shade800,
+              notificaciones: _pedidosActivos, // 🔥 ALERTA DE PEDIDOS
               onTap: () => _abrirModulo(context, const AdminRadar()),
             ),
             _BotonMenuCentral(
@@ -51,6 +96,7 @@ class _VistaAdminState extends State<VistaAdmin> {
               subtitulo: "Aprobación de expedientes",
               icono: Icons.people_alt,
               color: Colors.indigo.shade700,
+              notificaciones: _cuentasPendientes, // 🔥 ALERTA DE CUENTAS
               onTap: () => _abrirModulo(context, const AdminDirectorio()),
             ),
             _BotonMenuCentral(
@@ -69,16 +115,17 @@ class _VistaAdminState extends State<VistaAdmin> {
             ),
             _BotonMenuCentral(
               titulo: "Publicidad Global",
-              subtitulo: "Alertas y banners masivos",
+              subtitulo: "Alertas masivas",
               icono: Icons.campaign,
               color: Colors.orange.shade800,
               onTap: () => _abrirModulo(context, const AdminPublicidad()),
             ),
             _BotonMenuCentral(
               titulo: "Central de Soporte",
-              subtitulo: "Resolución de problemas",
+              subtitulo: "Chats y resolución",
               icono: Icons.support_agent,
               color: Colors.teal.shade700,
+              notificaciones: _ticketsPendientes, // 🔥 ALERTA DE TICKETS
               onTap: () => _abrirModulo(context, const soporte.AdminSoporte()),
             ),
           ],
@@ -88,13 +135,13 @@ class _VistaAdminState extends State<VistaAdmin> {
   }
 }
 
-// Tarjeta de diseño para el menú
 class _BotonMenuCentral extends StatelessWidget {
   final String titulo;
   final String subtitulo;
   final IconData icono;
   final Color color;
   final VoidCallback onTap;
+  final int notificaciones;
 
   const _BotonMenuCentral({
     required this.titulo,
@@ -102,40 +149,71 @@ class _BotonMenuCentral extends StatelessWidget {
     required this.icono,
     required this.color,
     required this.onTap,
+    this.notificaciones = 0,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                backgroundColor: color.withValues(alpha: 0.15),
-                radius: 24,
-                child: Icon(icono, color: color, size: 28),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Card(
+          elevation: 3,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.15),
+                    radius: 24,
+                    child: Icon(icono, color: color, size: 28),
+                  ),
+                  const Spacer(),
+                  Text(titulo,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text(subtitulo,
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                ],
               ),
-              const Spacer(),
-              Text(titulo,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
-              const SizedBox(height: 4),
-              Text(subtitulo,
-                  style: const TextStyle(color: Colors.grey, fontSize: 11),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
-            ],
+            ),
           ),
         ),
-      ),
+        // 🔥 GLOBO ROJO ESTILO WHATSAPP 🔥
+        if (notificaciones > 0)
+          Positioned(
+            top: -5,
+            right: -5,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 4)
+                ],
+              ),
+              child: Text(
+                notificaciones > 9 ? "9+" : "$notificaciones",
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
