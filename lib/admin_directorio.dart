@@ -32,8 +32,10 @@ class _AdminDirectorioState extends State<AdminDirectorio> {
     try {
       final resMet =
           await http.get(Uri.parse('$urlCentral/api/admin/metricas_globales'));
-      if (resMet.statusCode == 200) {
-        _metricas = json.decode(utf8.decode(resMet.bodyBytes));
+      if (resMet.statusCode == 200 && mounted) {
+        setState(() {
+          _metricas = json.decode(utf8.decode(resMet.bodyBytes));
+        });
       }
 
       final resDir = await http
@@ -178,19 +180,6 @@ class _AdminDirectorioState extends State<AdminDirectorio> {
                               final bool esPendiente =
                                   u['estado'].toString().toLowerCase() ==
                                       'pendiente';
-                              final bool esActivo =
-                                  u['estado'].toString().toLowerCase() ==
-                                      'activo';
-
-                              final String tel =
-                                  u['telefono']?.toString() ?? '';
-                              final String nombre =
-                                  u['nombre']?.toString() ?? '';
-                              final bool tieneTel = tel.isNotEmpty &&
-                                  tel != 'Sin Tel' &&
-                                  tel != 'Sin teléfono';
-                              final bool tieneNombre =
-                                  nombre.isNotEmpty && nombre != 'Sin Nombre';
 
                               return Card(
                                 elevation: esPendiente ? 4 : 1,
@@ -203,105 +192,7 @@ class _AdminDirectorioState extends State<AdminDirectorio> {
                                     borderRadius: BorderRadius.circular(8)),
                                 child: ListTile(
                                   onTap: () {
-                                    showDialog(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title:
-                                            Text("Expediente: ${u['nombre']}"),
-                                        content: SingleChildScrollView(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Center(
-                                                child: CircleAvatar(
-                                                  radius: 40,
-                                                  backgroundColor:
-                                                      u['rol'] == 'comercio'
-                                                          ? Colors.green
-                                                          : (u['rol'] ==
-                                                                  'repartidor'
-                                                              ? Colors.orange
-                                                              : Colors.blue),
-                                                  child: Icon(
-                                                      u['rol'] == 'comercio'
-                                                          ? Icons.store
-                                                          : (u['rol'] ==
-                                                                  'repartidor'
-                                                              ? Icons.motorcycle
-                                                              : Icons.person),
-                                                      size: 40,
-                                                      color: Colors.white),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 15),
-                                              Text(
-                                                  "🆔 ID en sistema: ${u['id']}"),
-                                              Text(
-                                                  "📌 Rol: ${u['rol'].toString().toUpperCase()}"),
-                                              Text(
-                                                  "⚡ Estado actual: ${u['estado'].toString().toUpperCase()}"),
-                                              const Divider(height: 25),
-                                              const Text(
-                                                  "🔍 VALIDACIÓN DE REQUISITOS:",
-                                                  style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold)),
-                                              const SizedBox(height: 10),
-                                              Row(children: [
-                                                Icon(
-                                                    tieneNombre
-                                                        ? Icons.check_circle
-                                                        : Icons.cancel,
-                                                    color: tieneNombre
-                                                        ? Colors.green
-                                                        : Colors.red,
-                                                    size: 20),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                    child: Text(
-                                                        "Nombre válido: ${u['nombre']}")),
-                                              ]),
-                                              const SizedBox(height: 8),
-                                              Row(children: [
-                                                Icon(
-                                                    tieneTel
-                                                        ? Icons.check_circle
-                                                        : Icons.cancel,
-                                                    color: tieneTel
-                                                        ? Colors.green
-                                                        : Colors.red,
-                                                    size: 20),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                    child: Text(
-                                                        "Teléfono: ${tieneTel ? u['telefono'] : 'Falta registrar'}")),
-                                              ]),
-                                              const SizedBox(height: 8),
-                                              if (!tieneNombre || !tieneTel)
-                                                Container(
-                                                  margin: const EdgeInsets.only(
-                                                      top: 10),
-                                                  padding:
-                                                      const EdgeInsets.all(8),
-                                                  color: Colors.red.shade50,
-                                                  child: const Text(
-                                                      "⚠️ Alerta: Faltan datos esenciales. Contáctalo antes de aprobar.",
-                                                      style: TextStyle(
-                                                          color: Colors.red,
-                                                          fontSize: 12)),
-                                                )
-                                            ],
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context),
-                                              child: const Text("Cerrar")),
-                                        ],
-                                      ),
-                                    );
+                                    _mostrarExpedienteCompleto(u);
                                   },
                                   leading: CircleAvatar(
                                     backgroundColor: u['rol'] == 'comercio'
@@ -323,63 +214,8 @@ class _AdminDirectorioState extends State<AdminDirectorio> {
                                   subtitle: Text(
                                       "Rol: ${u['rol'].toString().toUpperCase()}\nEstado: ${esPendiente ? '⏳ PENDIENTE' : u['estado'].toString().toUpperCase()}"),
                                   isThreeLine: true,
-                                  trailing: PopupMenuButton<String>(
-                                    icon: const Icon(Icons.more_vert),
-                                    onSelected: (accion) {
-                                      if (accion == 'aprobar') {
-                                        _cambiarEstado(u['id'], u['tipo'],
-                                            'activo', u['rol']);
-                                      }
-                                      if (accion == 'suspender') {
-                                        _cambiarEstado(u['id'], u['tipo'],
-                                            'suspendido', u['rol']);
-                                      }
-                                      if (accion == 'activar') {
-                                        _cambiarEstado(u['id'], u['tipo'],
-                                            'activo', u['rol']);
-                                      }
-                                      if (accion == 'eliminar') {
-                                        _eliminarRegistro(u['id'], u['tipo']);
-                                      }
-                                    },
-                                    itemBuilder: (BuildContext context) => [
-                                      if (esPendiente)
-                                        const PopupMenuItem(
-                                            value: 'aprobar',
-                                            child: Row(children: [
-                                              Icon(Icons.check_circle,
-                                                  color: Colors.green),
-                                              SizedBox(width: 8),
-                                              Text("Aprobar")
-                                            ])),
-                                      if (esActivo)
-                                        const PopupMenuItem(
-                                            value: 'suspender',
-                                            child: Row(children: [
-                                              Icon(Icons.pause_circle,
-                                                  color: Colors.orange),
-                                              SizedBox(width: 8),
-                                              Text("Suspender")
-                                            ])),
-                                      if (!esPendiente && !esActivo)
-                                        const PopupMenuItem(
-                                            value: 'activar',
-                                            child: Row(children: [
-                                              Icon(Icons.play_circle,
-                                                  color: Colors.green),
-                                              SizedBox(width: 8),
-                                              Text("Reactivar")
-                                            ])),
-                                      const PopupMenuItem(
-                                          value: 'eliminar',
-                                          child: Row(children: [
-                                            Icon(Icons.delete,
-                                                color: Colors.red),
-                                            SizedBox(width: 8),
-                                            Text("Eliminar raíz")
-                                          ])),
-                                    ],
-                                  ),
+                                  trailing: const Icon(Icons.remove_red_eye,
+                                      color: Color(0xFF1E3A8A)),
                                 ),
                               );
                             },
@@ -388,6 +224,226 @@ class _AdminDirectorioState extends State<AdminDirectorio> {
                 ),
               ],
             ),
+    );
+  }
+
+  void _mostrarExpedienteCompleto(Map<dynamic, dynamic> u) {
+    bool cargandoSwitch = false;
+
+    showDialog(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(builder: (context, setStateDialog) {
+            final bool esActivo =
+                u['estado'].toString().toLowerCase() == 'activo';
+            final bool esPendiente =
+                u['estado'].toString().toLowerCase() == 'pendiente';
+
+            final String fotoPath = u['foto'] ?? '';
+            final bool tieneFoto = fotoPath.isNotEmpty &&
+                fotoPath != 'Sin foto' &&
+                fotoPath != 'Sin logo';
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15)),
+              title: Text("Expediente: ${u['nombre']}",
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(15),
+                          image: tieneFoto
+                              ? DecorationImage(
+                                  image: NetworkImage("$urlCentral$fotoPath"),
+                                  fit: BoxFit.cover,
+                                )
+                              : null,
+                          border: Border.all(color: Colors.blueGrey, width: 2),
+                        ),
+                        child: !tieneFoto
+                            ? Icon(
+                                u['rol'] == 'comercio'
+                                    ? Icons.store
+                                    : (u['rol'] == 'repartidor'
+                                        ? Icons.motorcycle
+                                        : Icons.person),
+                                size: 60,
+                                color: Colors.white)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Card(
+                      color:
+                          esActivo ? Colors.green.shade50 : Colors.red.shade50,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(
+                              color: esActivo ? Colors.green : Colors.red,
+                              width: 2)),
+                      child: SwitchListTile(
+                        title: Text(
+                            esActivo ? "CUENTA ACTIVA" : "CUENTA SUSPENDIDA",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: esActivo
+                                    ? Colors.green.shade900
+                                    : Colors.red.shade900)),
+                        subtitle: Text(esActivo
+                            ? "Visible y operando en la app"
+                            : "Castigado/Oculto del sistema"),
+                        value: esActivo,
+                        activeThumbColor: Colors.green,
+                        inactiveThumbColor: Colors.red,
+                        onChanged: cargandoSwitch
+                            ? null
+                            : (bool activar) async {
+                                setStateDialog(() => cargandoSwitch = true);
+                                String nuevoEstatus =
+                                    activar ? 'activo' : 'suspendido';
+                                await _cambiarEstado(
+                                    u['id'], u['tipo'], nuevoEstatus, u['rol']);
+                                setStateDialog(() {
+                                  u['estado'] = nuevoEstatus;
+                                  cargandoSwitch = false;
+                                });
+                                setState(() {});
+                              },
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                    const Text("DATOS DE CONTACTO",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E3A8A))),
+                    const Divider(),
+                    _FilaDato(
+                        icono: Icons.phone,
+                        titulo: "Teléfono",
+                        valor: u['telefono']),
+                    _FilaDato(
+                        icono: Icons.email,
+                        titulo: "Correo",
+                        valor: u['correo']),
+                    _FilaDato(
+                        icono: Icons.location_on,
+                        titulo: "Dirección",
+                        valor: u['direccion']),
+                    if (u['rol'] == 'repartidor') ...[
+                      const SizedBox(height: 15),
+                      const Text("DATOS LEGALES Y VEHÍCULO",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1E3A8A))),
+                      const Divider(),
+                      _FilaDato(
+                          icono: Icons.badge, titulo: "DUI", valor: u['dui']),
+                      _FilaDato(
+                          icono: Icons.two_wheeler,
+                          titulo: "Vehículo",
+                          valor: u['vehiculo']),
+                      _FilaDato(
+                          icono: Icons.credit_card,
+                          titulo: "Placa/Tarjeta",
+                          valor: u['placa']),
+                      _FilaDato(
+                          icono: Icons.assignment_ind,
+                          titulo: "Licencia",
+                          valor: u['licencia']),
+                    ],
+                    if (u['rol'] == 'comercio') ...[
+                      const SizedBox(height: 15),
+                      const Text("DATOS DEL NEGOCIO",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1E3A8A))),
+                      const Divider(),
+                      _FilaDato(
+                          icono: Icons.star,
+                          titulo: "Tipo de Plan",
+                          valor: u['plan'] ?? 'comision'),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                if (esPendiente)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white),
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text("APROBAR AHORA"),
+                    onPressed: () async {
+                      await _cambiarEstado(
+                          u['id'], u['tipo'], 'activo', u['rol']);
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                      }
+                    },
+                  ),
+                TextButton.icon(
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  icon: const Icon(Icons.delete_forever),
+                  label: const Text("Eliminar Raíz"),
+                  onPressed: () async {
+                    await _eliminarRegistro(u['id'], u['tipo']);
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
+                  },
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cerrar"),
+                ),
+              ],
+            );
+          });
+        });
+  }
+}
+
+class _FilaDato extends StatelessWidget {
+  final IconData icono;
+  final String titulo;
+  final dynamic valor;
+
+  const _FilaDato(
+      {required this.icono, required this.titulo, required this.valor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icono, size: 18, color: Colors.blueGrey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(color: Colors.black87, fontSize: 14),
+                children: [
+                  TextSpan(
+                      text: "$titulo: ",
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  TextSpan(text: "${valor ?? 'No registrado'}"),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

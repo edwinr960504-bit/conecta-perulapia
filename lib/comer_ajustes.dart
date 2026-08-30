@@ -1,3 +1,4 @@
+// Archivo: comer_ajustes.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -57,9 +58,12 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                 data['logo'].toString().isNotEmpty &&
                 data['logo'] != 'Sin logo') {
               final String logoPath = data['logo'];
-              _urlLogoRemoto = logoPath.startsWith('http')
+              final String urlBase = logoPath.startsWith('http')
                   ? logoPath
                   : '$urlCentral$logoPath';
+              // 🔥 Anti-caché con timestamp para que se actualice al instante
+              _urlLogoRemoto =
+                  "$urlBase?v=${DateTime.now().millisecondsSinceEpoch}";
             }
           });
         }
@@ -98,9 +102,12 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
 
           setState(() {
             if (rutaServidor.isNotEmpty) {
-              _urlLogoRemoto = rutaServidor.startsWith('http')
+              final String urlBase = rutaServidor.startsWith('http')
                   ? rutaServidor
                   : '$urlCentral$rutaServidor';
+              // 🔥 Anti-caché dinámico
+              _urlLogoRemoto =
+                  "$urlBase?v=${DateTime.now().millisecondsSinceEpoch}";
             }
             _logoLocal =
                 null; // Limpiamos la local para priorizar la red sincronizada

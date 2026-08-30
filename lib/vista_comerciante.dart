@@ -1,3 +1,4 @@
+// Archivo: vista_comerciante.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -39,17 +40,20 @@ class _VistaComercianteState extends State<VistaComerciante> {
     _cargarLogoComercio();
   }
 
+  // 🔥 SINCRONIZACIÓN DIRECTA Y PRECISA CON EL PERFIL EXCLUSIVO DEL COMERCIO
   Future<void> _sincronizarEstadoReal() async {
     try {
-      final url = Uri.parse('$urlCentral/comercios_activos');
+      final url = Uri.parse('$urlCentral/api/comercio/perfil/${widget.idComercio}');
       final res = await http.get(url).timeout(const Duration(seconds: 5));
       if (res.statusCode == 200 && mounted) {
-        final List comerciosAbiertos = json.decode(utf8.decode(res.bodyBytes));
-        final bool realmenteAbierto = comerciosAbiertos
-            .any((c) => c['id'].toString() == widget.idComercio);
-        setState(() {
-          _localAbierto = realmenteAbierto;
-        });
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        if (data['status'] == 'ok') {
+          final String estado = data['estado'] ?? 'cerrado';
+          setState(() {
+            _localAbierto = (estado == 'activo');
+          });
+          debugPrint("✅ Estado real del local sincronizado: $estado (Abierto: $_localAbierto)");
+        }
       }
     } catch (e) {
       debugPrint("Error sincronizando estado del local: $e");
@@ -60,7 +64,6 @@ class _VistaComercianteState extends State<VistaComerciante> {
     try {
       final url =
           Uri.parse('$urlCentral/api/comercio/perfil/${widget.idComercio}');
-      // Sin límite estricto de timeout para evitar errores de red prematuros
       final res = await http.get(url);
       if (res.statusCode == 200 && mounted) {
         final data = json.decode(utf8.decode(res.bodyBytes));
@@ -70,17 +73,14 @@ class _VistaComercianteState extends State<VistaComerciante> {
             data['logo'] != 'Sin logo') {
           final String logoPath = data['logo'];
           setState(() {
-            _urlLogoComercio =
+            final String urlBase =
                 logoPath.startsWith('http') ? logoPath : '$urlCentral$logoPath';
+            _urlLogoComercio =
+                "$urlBase?v=${DateTime.now().millisecondsSinceEpoch}";
           });
           debugPrint(
               "✅ Logo cargado con éxito en la portada: $_urlLogoComercio");
-        } else {
-          debugPrint(
-              "⚠️ El servidor respondió pero el logo viene vacío o como 'Sin logo'");
         }
-      } else {
-        debugPrint("❌ Error del servidor al buscar perfil: ${res.statusCode}");
       }
     } catch (e) {
       debugPrint("🚨 Excepción al cargar el logo del comercio: $e");
@@ -116,7 +116,6 @@ class _VistaComercianteState extends State<VistaComerciante> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            // 🔥 DISEÑO DE PORTADA CON LA FOTO DE FONDO DEL NEGOCIO
             DrawerHeader(
               decoration: BoxDecoration(
                 color: const Color(0xFF1E3A8A),
@@ -186,7 +185,6 @@ class _VistaComercianteState extends State<VistaComerciante> {
                     ),
                   ),
                 );
-                // Al volver de ajustes, refrescamos la portada de inmediato
                 _cargarLogoComercio();
               },
             ),

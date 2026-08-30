@@ -193,7 +193,7 @@ class _LoginPantallaState extends State<LoginPantalla> {
 
                         try {
                           final url = Uri.parse(
-                            '$urlCentral/login/',
+                            '$urlCentral/api/login',
                           );
                           final respuesta = await http.post(
                             url,
@@ -207,7 +207,8 @@ class _LoginPantallaState extends State<LoginPantalla> {
                           if (!mounted) return;
 
                           if (respuesta.statusCode == 200) {
-                            final datosRespuesta = json.decode(respuesta.body);
+                            final datosRespuesta =
+                                json.decode(utf8.decode(respuesta.bodyBytes));
 
                             if (datosRespuesta['status'] == 'ok') {
                               // 🔥 LÓGICA DE ENRUTAMIENTO MAESTRO BLINDADA 🔥
@@ -630,48 +631,121 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                         );
                         return;
                       }
+
+                      // Validar que si eligió Comercio, llenó el nombre del negocio
+                      if (tipoUsuario == 'Comercio' &&
+                          _nombreComercioController.text.isEmpty) {
+                        mensajero.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Debes ingresar el nombre de tu Comercio/Local',
+                            ),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+
                       setState(() {
                         _guardandoRegistro = true;
                       });
 
-                      final Map<String, dynamic> datosRegistro = {
-                        'nombre': _nombreController.text.trim(),
-                        'telefono': _telefonoController.text.trim(),
-                        'correo': _correoController.text.trim(),
-                        'contrasena': _contrasenaController.text.trim(),
-                        'dui': _duiController.text.trim().isNotEmpty
-                            ? _duiController.text.trim()
-                            : "00000000-0",
-                        'rol': tipoUsuario.toLowerCase(),
-                        'direccion': "San Bartolomé Perulapía",
-                        'foto_perfil': "Sin foto"
-                      };
+                      // 🔥 LÓGICA DE ENRUTAMIENTO: ¿A QUÉ TABLA LO MANDAMOS? 🔥
+                      String urlDestino = '$urlCentral/api/registrar_usuario';
+                      Map<String, dynamic> datosRegistro = {};
+
+                      if (tipoUsuario == 'Comercio') {
+                        // Construimos los datos exactos que pide el backend para COMERCIOS
+                        urlDestino = '$urlCentral/api/registrar_comercio';
+                        datosRegistro = {
+                          'nombre_local': _nombreComercioController.text.trim(),
+                          'telefono': _telefonoController.text.trim(),
+                          'correo': _correoController.text.trim(),
+                          'contrasena': _contrasenaController.text.trim(),
+                          'dui': _duiController.text.trim().isNotEmpty
+                              ? _duiController.text.trim()
+                              : "00000000-0", // ✅ AQUÍ SE INCLUYE EL DUI DEL COMERCIO
+                          'direccion': "San Bartolomé Perulapía",
+                          'tipo_plan': 'comision',
+                          'logo': 'Sin logo'
+                        };
+                      } else if (tipoUsuario == 'Repartidor') {
+                        // Construimos los datos para REPARTIDOR
+                        urlDestino = '$urlCentral/api/registrar_repartidor';
+                        datosRegistro = {
+                          'nombre': _nombreController.text.trim(),
+                          'telefono': _telefonoController.text.trim(),
+                          'correo': _correoController.text.trim(),
+                          'contrasena': _contrasenaController.text.trim(),
+                          'dui': _duiController.text.trim().isNotEmpty
+                              ? _duiController.text.trim()
+                              : "00000000-0",
+                          'direccion': "San Bartolomé Perulapía",
+                          'tipo_vehiculo': tipoVehiculo,
+                          'licencia': _licenciaController.text.trim().isNotEmpty
+                              ? _licenciaController.text.trim()
+                              : "N/A",
+                          'tarjeta_circulacion':
+                              _circulacionController.text.trim().isNotEmpty
+                                  ? _circulacionController.text.trim()
+                                  : "N/A",
+                        };
+                      } else {
+                        // Construimos los datos para CLIENTE normal
+                        urlDestino = '$urlCentral/api/registrar_usuario';
+                        datosRegistro = {
+                          'nombre': _nombreController.text.trim(),
+                          'telefono': _telefonoController.text.trim(),
+                          'correo': _correoController.text.trim(),
+                          'contrasena': _contrasenaController.text.trim(),
+                          'dui': _duiController.text.trim().isNotEmpty
+                              ? _duiController.text.trim()
+                              : "00000000-0",
+                          'rol': 'cliente',
+                          'direccion': "San Bartolomé Perulapía",
+                          'foto_perfil': "Sin foto"
+                        };
+                      }
 
                       try {
                         final respuesta = await http.post(
-                          Uri.parse(
-                            '$urlCentral/registrar_usuario',
-                          ),
+                          Uri.parse(urlDestino),
                           headers: {'Content-Type': 'application/json'},
                           body: json.encode(datosRegistro),
                         );
                         if (!mounted) return;
+
+                        // 🔥 PRIMERO VERIFICAMOS EL CÓDIGO DE ESTADO (PROTECCIÓN 500) 🔥
                         if (respuesta.statusCode == 200) {
-                          mensajero.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                '¡Registro guardado con éxito! Pendiente de aprobación.',
+                          final dataRespuesta =
+                              json.decode(utf8.decode(respuesta.bodyBytes));
+
+                          if (dataRespuesta['status'] == 'ok') {
+                            mensajero.showSnackBar(
+                              SnackBar(
+                                content: Text(dataRespuesta['mensaje'] ??
+                                    '¡Registro exitoso! Ya puedes iniciar sesión.'),
+                                backgroundColor: Colors.green,
                               ),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                          _limpiarFormulario();
+                            );
+                            _limpiarFormulario();
+                          } else {
+                            mensajero.showSnackBar(
+                              SnackBar(
+                                content: Text(dataRespuesta['Alerta'] ??
+                                    'Error al registrar.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
                         } else {
+                          // Si la base de datos crashea (ej. Error 500 o 422)
                           mensajero.showSnackBar(
                             SnackBar(
                               content: Text(
-                                'Error en el motor. Código: ${respuesta.statusCode}',
+                                'Error interno en la base de datos. Código: ${respuesta.statusCode}',
                               ),
+                              backgroundColor: Colors.red,
                             ),
                           );
                         }
@@ -681,6 +755,7 @@ class _RegistroPantallaState extends State<RegistroPantalla> {
                             content: Text(
                               'Error de conexión: No se pudo llegar a la Central.',
                             ),
+                            backgroundColor: Colors.red,
                           ),
                         );
                       } finally {

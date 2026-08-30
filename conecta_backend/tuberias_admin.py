@@ -1,5 +1,5 @@
 # ========================================================
-# ARCHIVO COMPLETO: tuberias_admin.py (PODER TOTAL)
+# ARCHIVO COMPLETO: tuberias_admin.py (PODER TOTAL Y FOTOS DE LOCALES)
 # ========================================================
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -23,6 +23,9 @@ class BorrarReq(BaseModel):
 class AnuncioReq(BaseModel):
     mensaje: str
     imagen_url: str = ""
+
+class AccionMasiva(BaseModel):
+    estado: str # 'activo' o 'cerrado'
 
 # Función auxiliar para dejar rastro en la caja negra (Auditoría)
 def registrar_auditoria(accion: str):
@@ -137,15 +140,15 @@ def metricas_globales():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
-    # Contamos clientes ignorando si está en mayúsculas o minúsculas
+    # Contamos clientes
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE LOWER(rol) = 'cliente'")
     clientes = cursor.fetchone()[0]
     
-    # Contamos repartidores o motoristas de forma robusta
+    # Contamos repartidores o motoristas[cite: 6]
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE LOWER(rol) IN ('repartidor', 'motorista')")
     repartidores = cursor.fetchone()[0]
     
-    # Contamos todos los comercios registrados
+    # Cuenta absolutamente todos los comercios sin importar el estado[cite: 6]
     cursor.execute("SELECT COUNT(*) FROM comercios")
     comercios = cursor.fetchone()[0]
     
@@ -155,15 +158,38 @@ def metricas_globales():
         "repartidores": repartidores, 
         "comercios": comercios
     }
+
 @router.get("/api/admin/directorio_completo")
 def directorio_completo():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("SELECT id_usuario, COALESCE(nombre, 'Sin Nombre'), COALESCE(rol, 'cliente'), COALESCE(estado, 'pendiente'), COALESCE(telefono, 'Sin Tel') FROM usuarios ORDER BY id_usuario DESC")
-    usuarios = [{"id": r[0], "nombre": r[1], "rol": r[2], "estado": r[3], "telefono": r[4], "tipo": "usuario"} for r in cursor.fetchall()]
     
-    cursor.execute("SELECT id_comercio, COALESCE(nombre_local, 'Local'), 'comercio', COALESCE(estado, 'pendiente'), COALESCE(telefono, 'Sin Tel') FROM comercios ORDER BY id_comercio DESC")
-    comercios = [{"id": r[0], "nombre": r[1], "rol": "comercio", "estado": r[3], "telefono": r[4], "tipo": "comercio"} for r in cursor.fetchall()]
+    cursor.execute("""
+        SELECT id_usuario, COALESCE(nombre, 'Sin Nombre'), COALESCE(rol, 'cliente'), 
+               COALESCE(estado, 'pendiente'), COALESCE(telefono, 'Sin Tel'), 
+               COALESCE(foto_perfil, 'Sin foto'), COALESCE(correo, 'Sin correo'),
+               COALESCE(direccion, 'Sin dirección'), COALESCE(dui, 'N/A'),
+               COALESCE(tipo_vehiculo, 'N/A'), COALESCE(licencia, 'N/A'), COALESCE(tarjeta_circulacion, 'N/A')
+        FROM usuarios ORDER BY id_usuario DESC
+    """)
+    usuarios = [{
+        "id": r[0], "nombre": r[1], "rol": r[2], "estado": r[3], "telefono": r[4], 
+        "foto": r[5], "correo": r[6], "direccion": r[7], "dui": r[8],
+        "vehiculo": r[9], "licencia": r[10], "placa": r[11], "tipo": "usuario"
+    } for r in cursor.fetchall()]
+    
+    cursor.execute("""
+        SELECT id_comercio, COALESCE(nombre_local, 'Local'), 'comercio', 
+               COALESCE(estado, 'pendiente'), COALESCE(telefono, 'Sin Tel'), 
+               COALESCE(logo, 'Sin logo'), COALESCE(correo, 'Sin correo'),
+               COALESCE(direccion, 'Sin dirección'), COALESCE(tipo_plan, 'N/A')
+        FROM comercios ORDER BY id_comercio DESC
+    """)
+    comercios = [{
+        "id": r[0], "nombre": r[1], "rol": "comercio", "estado": r[3], "telefono": r[4], 
+        "foto": r[5], "correo": r[6], "direccion": r[7], "dui": "N/A",
+        "vehiculo": "N/A", "licencia": "N/A", "placa": "N/A", "plan": r[8], "tipo": "comercio"
+    } for r in cursor.fetchall()]
     conexion.close()
     
     return {"directorio": usuarios + comercios}
@@ -189,7 +215,21 @@ def eliminar_comercio(req: BorrarReq):
     return {"status": "ok"}
 
 # ========================================================
-# 6. NUEVAS TUBERÍAS DE PODER TOTAL (AUDITORÍA Y DIFUSIÓN)
+# 🔥 6. CONTROL MASIVO DE LOCALES (Para pruebas rápidas)
+# ========================================================
+@router.post("/api/admin/estado_masivo_comercios")
+def estado_masivo_comercios(datos: AccionMasiva):
+    nuevo_estado = "activo" if datos.estado.lower() == "activo" else "cerrado"
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("UPDATE comercios SET estado = ?", (nuevo_estado,))
+    conexion.commit()
+    conexion.close()
+    registrar_auditoria(f"ADMIN DICTATORIAL: Todos los comercios cambiados masivamente a estado: {nuevo_estado}")
+    return {"status": "ok", "mensaje": f"Todos los negocios ahora están {nuevo_estado}s."}
+
+# ========================================================
+# 7. NUEVAS TUBERÍAS DE PODER TOTAL (AUDITORÍA Y DIFUSIÓN)
 # ========================================================
 @router.get("/api/admin/auditoria_logs")
 def ver_auditoria():
@@ -211,7 +251,7 @@ def publicar_anuncio(anuncio: AnuncioReq):
             imagen_url TEXT
         )
     """)
-    cursor.execute("DELETE FROM anuncios_globales") # Mantiene solo el anuncio activo actual
+    cursor.execute("DELETE FROM anuncios_globales")
     cursor.execute("INSERT INTO anuncios_globales (mensaje, imagen_url) VALUES (?, ?)", (anuncio.mensaje, anuncio.imagen_url))
     conexion.commit()
     conexion.close()

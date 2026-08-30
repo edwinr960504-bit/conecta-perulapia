@@ -249,16 +249,19 @@ class _VistaCocinaState extends State<VistaCocina> {
                     body: json.encode({"abierto": nuevoValor}),
                   );
 
-                  if (respuesta.body.contains('error') ||
-                      respuesta.body.contains('Error') ||
-                      respuesta.statusCode == 400) {
+                  // 🔥 VALIDACIÓN BLINDADA Y LIMPIA CON EL JSON DE RESPUESTA
+                  final datosResq =
+                      json.decode(utf8.decode(respuesta.bodyBytes));
+
+                  if (respuesta.statusCode != 200 ||
+                      datosResq['status'] == 'error') {
                     widget.onLocalAbiertoChanged(estadoAnterior);
                     mensajero.showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                            "No puedes cerrar si tienes pedidos vivos. Entrégalo o cancélalo primero."),
+                      SnackBar(
+                        content: Text(datosResq['mensaje'] ??
+                            "No se pudo cambiar el estado del local."),
                         backgroundColor: Colors.red,
-                        duration: Duration(seconds: 4),
+                        duration: const Duration(seconds: 4),
                       ),
                     );
                   } else {
