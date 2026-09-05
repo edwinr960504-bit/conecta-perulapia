@@ -1,6 +1,6 @@
 # ========================================================
-# ARCHIVO COMPLETO: tuberias_negocio.py (CON SOPORTE DE DUI Y PREFIJOS)
-# PROPÓSITO: Gestión completa de comercios, menús, logos y registros con DUI
+# ARCHIVO COMPLETO: tuberias_negocio.py (CON SOPORTE DE LAT/LON Y DUI)
+# PROPÓSITO: Gestión completa de comercios, menús, logos y registros geolocalizados
 # ========================================================
 from fastapi import APIRouter, UploadFile, File, Form
 import sqlite3
@@ -32,6 +32,10 @@ def reparar_tablas_negocio():
         except Exception: pass
         try: cursor.execute("ALTER TABLE comercios ADD COLUMN dui TEXT DEFAULT '00000000-0'")
         except Exception: pass
+        try: cursor.execute("ALTER TABLE comercios ADD COLUMN latitud REAL DEFAULT 13.7746")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE comercios ADD COLUMN longitud REAL DEFAULT -89.0244")
+        except Exception: pass
         try: cursor.execute("ALTER TABLE comercios ADD COLUMN fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         except Exception: pass
         conn.commit()
@@ -52,6 +56,8 @@ class ComercioNuevo(BaseModel):
     direccion: str = "Sin dirección"
     tipo_plan: str = "comision"
     logo: str = "Sin logo"
+    latitud: float = 13.7746
+    longitud: float = -89.0244
 
 class ProductoNuevo(BaseModel):
     id_comercio: int
@@ -71,7 +77,7 @@ class EliminarProducto(BaseModel):
     id_producto: int
 
 # ========================================================
-# 1. REGISTRO Y PERFIL DE COMERCIOS (CON CAPTURA DE DUI)
+# 1. REGISTRO Y PERFIL DE COMERCIOS (CON CAPTURA DE DUI Y MAPA)
 # ========================================================
 @router.post("/registrar_comercio")
 @router.post("/registrar_comercio/")
@@ -105,15 +111,15 @@ def registrar_comercio(c: ComercioNuevo):
     cursor.execute("""
         INSERT INTO comercios (
             nombre_local, telefono, correo, contrasena, dui, direccion, 
-            tipo_plan, logo, estado, fecha_registro
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'activo', CURRENT_TIMESTAMP)
-    """, (nombre_limpio, tel_limpio, c.correo, c.contrasena, dui_limpio, c.direccion, c.tipo_plan, c.logo))
+            tipo_plan, logo, latitud, longitud, estado, fecha_registro
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', CURRENT_TIMESTAMP)
+    """, (nombre_limpio, tel_limpio, c.correo, c.contrasena, dui_limpio, c.direccion, c.tipo_plan, c.logo, c.latitud, c.longitud))
     
     id_nuevo = cursor.lastrowid
     conexion.commit()
     conexion.close()
     
-    return {"status": "ok", "mensaje": f"Comercio '{nombre_limpio}' registrado con DUI.", "id_comercio": id_nuevo, "id_identidad": f"C-{id_nuevo}"}
+    return {"status": "ok", "mensaje": f"Comercio '{nombre_limpio}' registrado con éxito.", "id_comercio": id_nuevo, "id_identidad": f"C-{id_nuevo}"}
 
 @router.post("/subir_foto_comercio/")
 @router.post("/subir_foto_comercio")
@@ -148,7 +154,7 @@ def obtener_perfil_comercio(id_comercio: int):
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     cursor.execute("""
-        SELECT id_comercio, nombre_local, direccion, horarios, logo, tipo_plan, estado, dui 
+        SELECT id_comercio, nombre_local, direccion, horarios, logo, tipo_plan, estado, dui, latitud, longitud 
         FROM comercios WHERE id_comercio = ?
     """, (id_comercio,))
     comercio = cursor.fetchone()
@@ -164,6 +170,8 @@ def obtener_perfil_comercio(id_comercio: int):
             "direccion": comercio["direccion"] or "",
             "horarios": comercio["horarios"] or "",
             "dui": comercio["dui"] or "",
+            "latitud": comercio["latitud"] if comercio["latitud"] is not None else 13.7746,
+            "longitud": comercio["longitud"] if comercio["longitud"] is not None else -89.0244,
             "logo": logo_path,
             "estado": comercio["estado"] or "cerrado"
         }
@@ -175,21 +183,32 @@ def actualizar_perfil_comercio(datos: dict):
     nombre = datos.get('nombre_local')
     direccion = datos.get('direccion')
     horarios = datos.get('horarios')
+    latitud = datos.get('latitud')
+    longitud = datos.get('longitud')
     
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("""
-        UPDATE comercios 
-        SET nombre_local = ?, direccion = ?, horarios = ? 
-        WHERE id_comercio = ?
-    """, (nombre, direccion, horarios, id_comercio))
+    
+    if latitud is not None and longitud is not None:
+        cursor.execute("""
+            UPDATE comercios 
+            SET nombre_local = ?, direccion = ?, horarios = ?, latitud = ?, longitud = ?
+            WHERE id_comercio = ?
+        """, (nombre, direccion, horarios, latitud, longitud, id_comercio))
+    else:
+        cursor.execute("""
+            UPDATE comercios 
+            SET nombre_local = ?, direccion = ?, horarios = ?
+            WHERE id_comercio = ?
+        """, (nombre, direccion, horarios, id_comercio))
+        
     filas = cursor.rowcount
     conexion.commit()
     conexion.close()
     
     if filas == 0:
         return {"status": "error", "mensaje": "ID de comercio fantasma. Actualización bloqueada."}
-    return {"status": "ok", "mensaje": "Perfil actualizado correctamente"}
+    return {"status": "ok", "mensaje": "Perfil y ubicación exacta actualizados correctamente"}
 
 # ========================================================
 # 2. GESTIÓN DE FOTOGRAFÍAS Y MENÚS DE PLATILLOS

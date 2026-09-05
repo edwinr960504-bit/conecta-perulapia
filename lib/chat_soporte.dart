@@ -6,8 +6,8 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'red.dart'; // Tu archivo de conexión
+import 'package:url_launcher/url_launcher.dart'; // 🔥 NUEVO PARA LLAMADAS
+import 'red.dart';
 
 class ChatSoporte extends StatefulWidget {
   final int idPedido;
@@ -32,7 +32,6 @@ class _ChatSoporteState extends State<ChatSoporte> {
   Timer? _latido;
   bool _cargando = true;
 
-  // MULTIMEDIA
   final ImagePicker _picker = ImagePicker();
   final AudioRecorder _recorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -85,17 +84,77 @@ class _ChatSoporteState extends State<ChatSoporte> {
     });
   }
 
-  // --- 1. ENVIAR TEXTO ---
+  // 🔥 FUNCIÓN PARA LLAMADAS
+  Future<void> _llamarSoporte() async {
+    final Uri url = Uri.parse('tel:+50377777777'); // Coloca tu número real aquí
+    if (!await launchUrl(url)) {
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("No se pudo abrir el marcador de llamadas")));
+    }
+  }
+
+  // 🔥 BORRAR UN SOLO MENSAJE
+  void _confirmarBorradoIndividual(int idMensaje) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Borrar Mensaje"),
+        content: const Text("¿Quieres eliminar este mensaje del chat?"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancelar")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await http.delete(
+                  Uri.parse('$urlCentral/api/chat/borrar_mensaje/$idMensaje'));
+              _cargarHistorial(silencioso: true);
+            },
+            child: const Text("Borrar", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 🔥 BORRAR
+  void _confirmarBorradoTotal() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Limpiar Chat"),
+        content: const Text("¿Estás seguro de borrar toda esta conversación?"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancelar")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await http.delete(Uri.parse(
+                  '$urlCentral/api/chat/borrar_todo/${widget.idPedido}'));
+              _cargarHistorial(silencioso: true);
+            },
+            child: const Text("Vaciar Chat",
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _enviarTexto() async {
     final texto = _msjCtrl.text.trim();
     if (texto.isEmpty) return;
-
     _msjCtrl.clear();
     setState(() => _escribiendo = false);
     await _enviarMensajeBD(texto, "");
   }
 
-  // --- 2. ENVIAR FOTO ---
   Future<void> _tomarFoto() async {
     final XFile? foto =
         await _picker.pickImage(source: ImageSource.camera, imageQuality: 70);
@@ -104,33 +163,24 @@ class _ChatSoporteState extends State<ChatSoporte> {
     }
   }
 
-  // --- 3. GRABAR Y ENVIAR AUDIO ---
   Future<void> _gestionarGrabacion() async {
     if (_estaGrabando) {
-      // Detener grabación
       final path = await _recorder.stop();
       setState(() => _estaGrabando = false);
-      if (path != null) {
-        await _subirArchivo(File(path), "🎤 Nota de voz");
-      }
+      if (path != null) await _subirArchivo(File(path), "🎤 Nota de voz");
     } else {
-      // Iniciar grabación
-      if (await Permission.microphone.request().isGranted) {
+      // 🔥 VALIDACIÓN DE PERMISO NATIVA DEL PAQUETE RECORD 🔥
+      if (await _recorder.hasPermission()) {
         final dir = Directory.systemTemp;
         _audioPath =
             '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
         await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc),
             path: _audioPath!);
         setState(() => _estaGrabando = true);
-      } else {
-        // ignore: use_build_context_synchronously
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Permiso de micrófono denegado")));
       }
     }
   }
 
-  // --- 4. MOTOR DE SUBIDA DE ARCHIVOS A PYTHON ---
   Future<void> _subirArchivo(File archivo, String mensajeDescriptivo) async {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text("Subiendo archivo..."), duration: Duration(seconds: 1)));
@@ -139,22 +189,18 @@ class _ChatSoporteState extends State<ChatSoporte> {
           'POST', Uri.parse('$urlCentral/api/chat/subir_evidencia'));
       peticion.files
           .add(await http.MultipartFile.fromPath('archivo', archivo.path));
-
       var respuesta = await peticion.send();
       if (respuesta.statusCode == 200) {
         var resData = await http.Response.fromStream(respuesta);
         var jsonRes = json.decode(resData.body);
         if (jsonRes['status'] == 'ok') {
-          // El archivo subió, ahora enviamos el mensaje con la ruta
           await _enviarMensajeBD(mensajeDescriptivo, jsonRes['ruta']);
         }
       }
-    } catch (e) {
-      debugPrint("Error subiendo archivo: $e");
-    }
+      // ignore: empty_catches
+    } catch (e) {}
   }
 
-  // --- 5. GUARDAR MENSAJE FINAL EN LA BASE DE DATOS ---
   Future<void> _enviarMensajeBD(String mensaje, String evidencia) async {
     try {
       await http.post(
@@ -170,9 +216,8 @@ class _ChatSoporteState extends State<ChatSoporte> {
       );
       _cargarHistorial();
       _bajarScroll();
-    } catch (e) {
-      debugPrint("Error enviando: $e");
-    }
+      // ignore: empty_catches
+    } catch (e) {}
   }
 
   void _reproducirAudio(String rutaWeb) async {
@@ -185,14 +230,26 @@ class _ChatSoporteState extends State<ChatSoporte> {
     return Scaffold(
       backgroundColor: Colors.grey[200],
       appBar: AppBar(
-        title: Text("Chat - Rastreo #${widget.idPedido}",
+        title: Text(
+            widget.idPedido < 0
+                ? "Soporte General"
+                : "Chat #${widget.idPedido}",
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.phone),
+            onPressed: _llamarSoporte,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep),
+            onPressed: _confirmarBorradoTotal,
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // ZONA DE MENSAJES
           Expanded(
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
@@ -205,7 +262,6 @@ class _ChatSoporteState extends State<ChatSoporte> {
                       final bool soyYo = m['remitente'] == widget.remitente;
                       final String evidencia = m['evidencia'] ?? '';
                       final bool tieneEvidencia = evidencia.isNotEmpty;
-
                       final bool esImagen =
                           evidencia.toLowerCase().endsWith('.jpg') ||
                               evidencia.toLowerCase().endsWith('.png') ||
@@ -213,114 +269,107 @@ class _ChatSoporteState extends State<ChatSoporte> {
                       final bool esAudio =
                           evidencia.toLowerCase().endsWith('.m4a');
 
-                      return Align(
-                        alignment: soyYo
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(12),
-                          constraints: BoxConstraints(
-                              maxWidth:
-                                  MediaQuery.of(context).size.width * 0.75),
-                          decoration: BoxDecoration(
-                            color:
-                                soyYo ? const Color(0xFF1E3A8A) : Colors.white,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(15),
-                              topRight: const Radius.circular(15),
-                              bottomLeft: soyYo
-                                  ? const Radius.circular(15)
-                                  : const Radius.circular(0),
-                              bottomRight: soyYo
-                                  ? const Radius.circular(0)
-                                  : const Radius.circular(15),
+                      return GestureDetector(
+                        onLongPress: () {
+                          if (m['id_mensaje'] != null) {
+                            _confirmarBorradoIndividual(m['id_mensaje']);
+                          }
+                        },
+                        child: Align(
+                          alignment: soyYo
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            constraints: BoxConstraints(
+                                maxWidth:
+                                    MediaQuery.of(context).size.width * 0.75),
+                            decoration: BoxDecoration(
+                              color: soyYo
+                                  ? const Color(0xFF1E3A8A)
+                                  : Colors.white,
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(15),
+                                topRight: const Radius.circular(15),
+                                bottomLeft: soyYo
+                                    ? const Radius.circular(15)
+                                    : const Radius.circular(0),
+                                bottomRight: soyYo
+                                    ? const Radius.circular(0)
+                                    : const Radius.circular(15),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.05),
+                                    blurRadius: 5)
+                              ],
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  blurRadius: 5)
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                m['remitente'],
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color:
-                                        soyYo ? Colors.blue[200] : Colors.grey),
-                              ),
-                              const SizedBox(height: 5),
-
-                              // RENDERIZADO DE MULTIMEDIA
-                              if (tieneEvidencia && esImagen)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(
-                                        "$urlCentral$evidencia",
-                                        fit: BoxFit.cover),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(m['remitente'],
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: soyYo
+                                            ? Colors.blue[200]
+                                            : Colors.grey)),
+                                const SizedBox(height: 5),
+                                if (tieneEvidencia && esImagen)
+                                  Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 8.0),
+                                      child: ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          child: Image.network(
+                                              "$urlCentral$evidencia",
+                                              fit: BoxFit.cover)))
+                                else if (tieneEvidencia && esAudio)
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: soyYo
+                                            ? Colors.white
+                                            : const Color(0xFF1E3A8A),
+                                        foregroundColor: soyYo
+                                            ? const Color(0xFF1E3A8A)
+                                            : Colors.white),
+                                    icon: const Icon(Icons.play_arrow),
+                                    label: const Text("Reproducir"),
+                                    onPressed: () =>
+                                        _reproducirAudio(evidencia),
                                   ),
-                                )
-                              else if (tieneEvidencia && esAudio)
-                                ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: soyYo
-                                        ? Colors.white
-                                        : const Color(0xFF1E3A8A),
-                                    foregroundColor: soyYo
-                                        ? const Color(0xFF1E3A8A)
-                                        : Colors.white,
-                                  ),
-                                  icon: const Icon(Icons.play_arrow),
-                                  label: const Text("Reproducir Audio"),
-                                  onPressed: () => _reproducirAudio(evidencia),
-                                ),
-
-                              // TEXTO NORMAL
-                              Text(
-                                m['mensaje'],
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    color:
-                                        soyYo ? Colors.white : Colors.black87),
-                              ),
-                            ],
+                                Text(m['mensaje'],
+                                    style: TextStyle(
+                                        fontSize: 15,
+                                        color: soyYo
+                                            ? Colors.white
+                                            : Colors.black87)),
+                              ],
+                            ),
                           ),
                         ),
                       );
                     },
                   ),
           ),
-
-          // BARRA INFERIOR (TECLADO, FOTO Y AUDIO)
           Container(
             color: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Row(
               children: [
-                // BOTÓN DE CÁMARA
                 IconButton(
-                  icon: const Icon(Icons.camera_alt,
-                      color: Colors.blueGrey, size: 28),
-                  onPressed: _tomarFoto,
-                ),
-
-                // CAMPO DE TEXTO
+                    icon: const Icon(Icons.camera_alt,
+                        color: Colors.blueGrey, size: 28),
+                    onPressed: _tomarFoto),
                 Expanded(
                   child: TextField(
                     controller: _msjCtrl,
-                    onChanged: (val) {
-                      setState(() => _escribiendo = val.trim().isNotEmpty);
-                    },
+                    onChanged: (val) =>
+                        setState(() => _escribiendo = val.trim().isNotEmpty),
                     decoration: InputDecoration(
-                      hintText: _estaGrabando
-                          ? "Grabando audio..."
-                          : "Escribe un mensaje...",
+                      hintText: _estaGrabando ? "Grabando..." : "Mensaje...",
                       filled: true,
                       fillColor:
                           _estaGrabando ? Colors.red.shade50 : Colors.grey[200],
@@ -333,10 +382,7 @@ class _ChatSoporteState extends State<ChatSoporte> {
                     readOnly: _estaGrabando,
                   ),
                 ),
-
                 const SizedBox(width: 8),
-
-                // BOTÓN DINÁMICO (ENVIAR TEXTO O GRABAR AUDIO)
                 GestureDetector(
                   onTap: _escribiendo ? _enviarTexto : _gestionarGrabacion,
                   child: CircleAvatar(
@@ -344,12 +390,11 @@ class _ChatSoporteState extends State<ChatSoporte> {
                         _estaGrabando ? Colors.red : const Color(0xFF1E3A8A),
                     radius: 24,
                     child: Icon(
-                      _escribiendo
-                          ? Icons.send
-                          : (_estaGrabando ? Icons.stop : Icons.mic),
-                      color: Colors.white,
-                      size: 24,
-                    ),
+                        _escribiendo
+                            ? Icons.send
+                            : (_estaGrabando ? Icons.stop : Icons.mic),
+                        color: Colors.white,
+                        size: 24),
                   ),
                 ),
               ],

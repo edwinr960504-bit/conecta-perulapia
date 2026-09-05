@@ -55,7 +55,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
 
     _obtenerUbicacionReal();
 
-    _timerMonitoreo = Timer.periodic(const Duration(seconds: 4), (timer) {
+    _timerMonitoreo = Timer.periodic(const Duration(seconds: 3), (timer) {
       _obtenerUbicacionReal();
     });
   }
@@ -67,7 +67,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
     super.dispose();
   }
 
-  Future<void> _trazarRutaWaze() async {
+  Future<void> _trazarRutaOSRM() async {
     try {
       final url = Uri.parse(
           'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionDestino.longitude},${_ubicacionDestino.latitude}?geometries=geojson');
@@ -90,40 +90,35 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
         }
       }
     } catch (e) {
-      debugPrint("⚠️ No se pudo trazar la ruta de calles: $e");
+      debugPrint("⚠️ No se pudo trazar la ruta por carretera: $e");
     }
   }
 
+  // 🔥 EXTRACCIÓN DIRECTA: GPS de alta precisión en tiempo real
   Future<void> _obtenerUbicacionReal() async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.whileInUse ||
-          permission == LocationPermission.always) {
-        Position pos = await Geolocator.getCurrentPosition(
-          locationSettings:
-              const LocationSettings(accuracy: LocationAccuracy.high),
-        );
+      Position pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.best),
+      );
 
-        if (mounted) {
-          LatLng nuevaPos = LatLng(pos.latitude, pos.longitude);
+      if (mounted) {
+        LatLng nuevaPos = LatLng(pos.latitude, pos.longitude);
 
-          const Distance dist = Distance();
-          double km =
-              dist.as(LengthUnit.Meter, nuevaPos, _ubicacionDestino) / 1000;
-          int minutos = (km * 3).ceil();
+        const Distance dist = Distance();
+        double km =
+            dist.as(LengthUnit.Meter, nuevaPos, _ubicacionDestino) / 1000;
+        int minutos = (km * 3).ceil();
 
-          setState(() {
-            _ubicacionMotorista = nuevaPos;
-            _cargando = false;
-            _distanciaYtiempo =
-                "A ${km.toStringAsFixed(2)} km • Llegada en $minutos min";
-          });
+        setState(() {
+          _ubicacionMotorista = nuevaPos;
+          _cargando = false;
+          _distanciaYtiempo =
+              "A ${km.toStringAsFixed(2)} km • Llegada en $minutos min";
+        });
 
-          _trazarRutaWaze();
-        }
+        // Llamamos al buscador de rutas por carretera
+        _trazarRutaOSRM();
       }
     } catch (e) {
       if (mounted) {
@@ -224,8 +219,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                     ),
                   );
                   GpsService.apagarGps();
-                  Navigator.pop(
-                      context); // Cierra el mapa y vuelve a la pantalla anterior
+                  Navigator.pop(context);
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -338,7 +332,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
             ],
           ),
 
-          // Botones flotantes de Zoom y Francotirador
+          // Botones flotantes
           Positioned(
             right: 16,
             bottom: 230,
@@ -346,43 +340,34 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 FloatingActionButton(
-                  heroTag: "btnZoomInRepa",
+                  heroTag: "zoom_in_mapa_repa",
                   mini: true,
                   backgroundColor: Colors.white,
-                  foregroundColor: widget.faseRecoleccion
-                      ? Colors.orange.shade800
-                      : Colors.blue.shade800,
-                  elevation: 4,
+                  foregroundColor: Colors.black87,
                   onPressed: _zoomIn,
-                  child: const Icon(Icons.add),
+                  child: const Icon(Icons.add, size: 20),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
-                  heroTag: "btnZoomOutRepa",
+                  heroTag: "zoom_out_mapa_repa",
                   mini: true,
                   backgroundColor: Colors.white,
-                  foregroundColor: widget.faseRecoleccion
-                      ? Colors.orange.shade800
-                      : Colors.blue.shade800,
-                  elevation: 4,
+                  foregroundColor: Colors.black87,
                   onPressed: _zoomOut,
-                  child: const Icon(Icons.remove),
+                  child: const Icon(Icons.remove, size: 20),
                 ),
                 const SizedBox(height: 16),
                 FloatingActionButton(
-                  heroTag: "btnCentrarMotoRepa",
+                  heroTag: "centrar_moto_mapa_repa",
                   backgroundColor: Colors.black87,
                   foregroundColor: Colors.white,
-                  elevation: 4,
                   onPressed: _centrarEnMoto,
-                  tooltip: "Centrar en mi ubicación",
                   child: const Icon(Icons.my_location),
                 ),
               ],
             ),
           ),
 
-          // 🔥 ORDEN INVERTIDO: TARJETA WAZE ARRIBA, BOTÓN VERDE ABAJO 🔥
           Positioned(
             bottom: 20,
             left: 16,
@@ -390,7 +375,6 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 1. Tarjeta de navegación Waze con la flecha parpadeante (Arriba)
                 GestureDetector(
                   onTap: _centrarEnDestino,
                   child: Card(
@@ -466,8 +450,6 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                     ),
                   ),
                 ),
-
-                // 2. Botón verde de Entrega al Cliente (Abajo)
                 if (!widget.faseRecoleccion) ...[
                   const SizedBox(height: 10),
                   SizedBox(

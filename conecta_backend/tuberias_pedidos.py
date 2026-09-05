@@ -1,5 +1,5 @@
 # =====================================================================
-# ARCHIVO COMPLETO: tuberias_pedidos.py (BLINDADO)
+# ARCHIVO COMPLETO: tuberias_pedidos.py (BLINDADO CON UBICACIÓN EXACTA)
 # =====================================================================
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -21,6 +21,9 @@ def asegurar_estructura():
             ("longitud_repartidor", "REAL DEFAULT 0.0"), 
             ("latitud_cliente", "REAL DEFAULT 0.0"), 
             ("longitud_cliente", "REAL DEFAULT 0.0"), 
+            # 🔥 Aseguramos columnas para guardar el punto exacto del comercio en el pedido
+            ("latitud_comercio", "REAL DEFAULT 13.7746"),
+            ("longitud_comercio", "REAL DEFAULT -89.0244"),
             ("tiempo_preparacion", "TEXT DEFAULT 'Por confirmar'"),
             ("numero_diario", "INTEGER DEFAULT 1"),
             ("codigo_rastreo", "TEXT DEFAULT 'CP-0000'")
@@ -34,7 +37,7 @@ def asegurar_estructura():
 asegurar_estructura()
 
 class PedidoNuevo(BaseModel):
-    id_cliente: int  # 🔥 ELIMINADO EL "= 1". Si la app no manda quién es, el pedido no se contamina en el perfil de otro.
+    id_cliente: int  
     id_comercio: int = None
     comercio_id: int = None
     id_local: int = None
@@ -82,19 +85,29 @@ def crear_pedido(p: PedidoNuevo):
         
         comercio_real = p.id_comercio or p.comercio_id or p.id_local or p.id_negocio or 1
         
+        # 🔥 EXTRAEMOS LAS COORDENADAS EXACTAS Y FIJAS DEL COMERCIO DESDE SU TABLA
+        cursor.execute("SELECT latitud, longitud FROM comercios WHERE id_comercio = ?", (comercio_real,))
+        datos_comercio = cursor.fetchone()
+        lat_comercio_fijo = datos_comercio[0] if (datos_comercio and datos_comercio[0] is not None) else 13.7746
+        lon_comercio_fijo = datos_comercio[1] if (datos_comercio and datos_comercio[1] is not None) else -89.0244
+
+        # 🔥 GUARDAMOS EL PEDIDO HEREDANDO EL PUNTO EXACTO DEL COMERCIO
         cursor.execute("""
             INSERT INTO pedidos (
                 id_cliente, id_comercio, descripcion, precio_comida, tarifa_envio, 
                 comision_app, total_pago, distancia_km, pin_seguridad, pin_recoleccion, 
                 codigo_rastreo, metodo_pago, estado, id_repartidor, latitud_repartidor, 
-                longitud_repartidor, latitud_cliente, longitud_cliente, numero_diario, fecha
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', 0, 0.0, 0.0, ?, ?, ?, ?)
+                longitud_repartidor, latitud_cliente, longitud_cliente, 
+                latitud_comercio, longitud_comercio, numero_diario, fecha
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', 0, 0.0, 0.0, ?, ?, ?, ?, ?, ?)
         """, (
             p.id_cliente, 
             comercio_real, 
             p.descripcion, p.precio_comida, envio, comision, total, p.distancia_km, 
             pin_seguridad, pin_recoleccion, codigo_rastreo, p.metodo_pago, 
-            p.latitud_cliente, p.longitud_cliente, num_diario, fecha_exacta
+            p.latitud_cliente, p.longitud_cliente, 
+            lat_comercio_fijo, lon_comercio_fijo, 
+            num_diario, fecha_exacta
         ))
         
         orden_id = cursor.lastrowid
@@ -270,7 +283,7 @@ def actualizar_gps_cliente(c: CoordenadasGPS):
 def obtener_gps(id_pedido: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("SELECT latitud_repartidor, longitud_repartidor, latitud_cliente, longitud_cliente, estado FROM pedidos WHERE id_pedido = ?", (id_pedido,))
+    cursor.execute("SELECT latitud_repartidor, longitud_repartidor, latitud_cliente, longitud_cliente, latitud_comercio, longitud_comercio, estado FROM pedidos WHERE id_pedido = ?", (id_pedido,))
     row = cursor.fetchone()
     conexion.close()
     
@@ -278,7 +291,9 @@ def obtener_gps(id_pedido: int):
         return {
             "status": "ok", "latitud_repartidor": row[0] or 0.0, "longitud_repartidor": row[1] or 0.0,
             "latitud": row[0] or 0.0, "longitud": row[1] or 0.0, "latitud_cliente": row[2] or 13.7333,
-            "longitud_cliente": row[3] or -89.1167, "latitud_comercio": 13.7333, "longitud_comercio": -89.1167, "estado_pedido": row[4]
+            "longitud_cliente": row[3] or -89.1167, 
+            "latitud_comercio": row[4] or 13.7746, "longitud_comercio": row[5] or -89.0244, 
+            "estado_pedido": row[6]
         }
     return {"status": "error", "estado_pedido": "desconocido"}
 

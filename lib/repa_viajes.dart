@@ -9,7 +9,6 @@ import 'red.dart';
 import 'gps_service.dart';
 import 'radar_mapa.dart';
 
-// WIDGET: Flecha de Navegación Parpadeante
 class BotonNavegacionParpadeante extends StatefulWidget {
   final Color color;
   const BotonNavegacionParpadeante({super.key, required this.color});
@@ -68,7 +67,7 @@ class _RepaViajesState extends State<RepaViajes> {
   LatLng _ubicacionActual = const LatLng(13.7746, -89.0244);
   LatLng _ubicacionDestino = const LatLng(13.7746, -89.0244);
   Timer? _gpsTimerLocal;
-  Timer? _timerEstadoViaje; // 🔥 EL NUEVO MOTOR TURBO 🔥
+  Timer? _timerEstadoViaje;
 
   final MapController _mapController = MapController();
 
@@ -78,7 +77,6 @@ class _RepaViajesState extends State<RepaViajes> {
     _cargarViajeVivo();
     _iniciarMonitoreoPosicion();
 
-    // 🔥 LATIDO SILENCIOSO: Revisa cambios cada 3 segundos (ej: PIN del Local)
     _timerEstadoViaje = Timer.periodic(const Duration(seconds: 3), (_) {
       _cargarViajeSilencioso();
     });
@@ -87,24 +85,25 @@ class _RepaViajesState extends State<RepaViajes> {
   @override
   void dispose() {
     _gpsTimerLocal?.cancel();
-    _timerEstadoViaje?.cancel(); // 🔥 Matamos el timer al salir
+    _timerEstadoViaje?.cancel();
     super.dispose();
   }
 
   void _iniciarMonitoreoPosicion() {
     _actualizarPosicionLocal();
-    _gpsTimerLocal = Timer.periodic(const Duration(seconds: 8), (_) {
+    _gpsTimerLocal = Timer.periodic(const Duration(seconds: 4), (_) {
       if (mounted && _viaje != null) {
         _actualizarPosicionLocal();
       }
     });
   }
 
+  // 🔥 EXTRACCIÓN DIRECTA: Sin pedir permisos, directo a la antena
   Future<void> _actualizarPosicionLocal() async {
     try {
       final pos = await Geolocator.getCurrentPosition(
         locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+            const LocationSettings(accuracy: LocationAccuracy.best),
       );
       if (mounted) {
         setState(() {
@@ -119,7 +118,6 @@ class _RepaViajesState extends State<RepaViajes> {
     await _cargarViajeSilencioso();
   }
 
-  // 🔥 CARGA FLUIDA SIN MOSTRAR LA RUEDA MOLESTA
   Future<void> _cargarViajeSilencioso() async {
     try {
       final res = await http.get(Uri.parse(
@@ -142,11 +140,6 @@ class _RepaViajesState extends State<RepaViajes> {
                   : (viajeData['longitud_cliente']?.toString() ??
                       '-89.0240')) ??
               -89.0244;
-
-          if (faseRecoleccion && latDest == 13.7333) {
-            latDest = 13.7746;
-            lonDest = -89.0244;
-          }
 
           setState(() {
             _viaje = viajeData;
@@ -236,7 +229,7 @@ class _RepaViajesState extends State<RepaViajes> {
                     mapController: _mapController,
                     options: MapOptions(
                       initialCenter: _ubicacionActual,
-                      initialZoom: 14.0,
+                      initialZoom: 16.0,
                       interactionOptions:
                           const InteractionOptions(flags: InteractiveFlag.none),
                     ),

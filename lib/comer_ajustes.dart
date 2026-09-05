@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'selector_mapa.dart';
 
 import 'red.dart';
 
@@ -27,6 +28,9 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
   final TextEditingController _direccionCtrl = TextEditingController();
   final TextEditingController _horariosCtrl = TextEditingController();
 
+  double? _latitudSeleccionada;
+  double? _longitudSeleccionada;
+
   bool _aceptaBitcoin = true;
   String _planPago = "Comisión 10%";
   bool _guardando = false;
@@ -42,7 +46,6 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
     _cargarDatosActualesComercio();
   }
 
-  // 🔥 CARGA DIRECTA DESDE EL ENDPOINT EXCLUSIVO DEL COMERCIO
   Future<void> _cargarDatosActualesComercio() async {
     try {
       final url =
@@ -54,6 +57,10 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
           setState(() {
             _direccionCtrl.text = data['direccion'] ?? '';
             _horariosCtrl.text = data['horarios'] ?? '';
+            _latitudSeleccionada =
+                double.tryParse(data['latitud']?.toString() ?? '');
+            _longitudSeleccionada =
+                double.tryParse(data['longitud']?.toString() ?? '');
             if (data['logo'] != null &&
                 data['logo'].toString().isNotEmpty &&
                 data['logo'] != 'Sin logo') {
@@ -61,7 +68,6 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               final String urlBase = logoPath.startsWith('http')
                   ? logoPath
                   : '$urlCentral$logoPath';
-              // 🔥 Anti-caché con timestamp para que se actualice al instante
               _urlLogoRemoto =
                   "$urlBase?v=${DateTime.now().millisecondsSinceEpoch}";
             }
@@ -105,12 +111,10 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               final String urlBase = rutaServidor.startsWith('http')
                   ? rutaServidor
                   : '$urlCentral$rutaServidor';
-              // 🔥 Anti-caché dinámico
               _urlLogoRemoto =
                   "$urlBase?v=${DateTime.now().millisecondsSinceEpoch}";
             }
-            _logoLocal =
-                null; // Limpiamos la local para priorizar la red sincronizada
+            _logoLocal = null;
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -120,14 +124,6 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
             ),
           );
           _cargarDatosActualesComercio();
-        } else {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Error al subir la foto al servidor"),
-              backgroundColor: Colors.red,
-            ),
-          );
         }
       } catch (e) {
         debugPrint("Error subiendo logo: $e");
@@ -151,6 +147,8 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
           'horarios': _horariosCtrl.text.trim(),
           'acepta_bitcoin': _aceptaBitcoin,
           'plan_pago': _planPago,
+          'latitud': _latitudSeleccionada,
+          'longitud': _longitudSeleccionada,
         }),
       );
 
@@ -158,12 +156,11 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("✅ Ajustes guardados correctamente"),
+            content: Text("✅ Ajustes y ubicación guardados correctamente"),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(
-            context, true); // Retornamos true para refrescar la vista principal
+        Navigator.pop(context, true);
       }
     } catch (e) {
       debugPrint("🚨 Error al guardar: $e");
@@ -265,11 +262,38 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               TextFormField(
                 controller: _direccionCtrl,
                 maxLines: 2,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: "Dirección Exacta",
-                  prefixIcon: Icon(Icons.location_on),
-                  border: OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.location_on),
+                  border: const OutlineInputBorder(),
                   hintText: "Ej. Frente al parque municipal",
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.map_rounded,
+                        color: Color(0xFF1E3A8A), size: 28),
+                    tooltip: "Seleccionar ubicación exacta en el mapa",
+                    onPressed: () async {
+                      // 🔥 AQUÍ ESTÁ LA CLAVE: Le pasamos las coordenadas guardadas actuales
+                      // para que el mapa abra exactamente donde el comerciante lo dejó la última vez.
+                      final resultadoUbicacion = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SelectorMapaPantalla(
+                            initialLat: _latitudSeleccionada,
+                            initialLon: _longitudSeleccionada,
+                          ),
+                        ),
+                      );
+
+                      if (resultadoUbicacion != null) {
+                        setState(() {
+                          _direccionCtrl.text = resultadoUbicacion['direccion'];
+                          _latitudSeleccionada = resultadoUbicacion['latitud'];
+                          _longitudSeleccionada =
+                              resultadoUbicacion['longitud'];
+                        });
+                      }
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: 15),

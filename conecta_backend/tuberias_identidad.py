@@ -1,5 +1,5 @@
 # ========================================================
-# ARCHIVO COMPLETO: tuberias_identidad.py (BLINDADO CON PREFIJOS)
+# ARCHIVO COMPLETO: tuberias_identidad.py (BLINDADO CON PREFIJOS Y MAPAS REALES)
 # PROPÓSITO: Autenticación, perfiles de usuario, viajes activos y registros
 # ========================================================
 from fastapi import APIRouter, UploadFile, File, Form
@@ -10,6 +10,22 @@ import shutil
 
 router = APIRouter()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
+
+# 🔥 AUTO-REPARADOR DE BASE DE DATOS: Asegura las columnas de latitud y longitud en la tabla comercios
+def asegurar_columnas_mapa():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        try: cursor.execute("ALTER TABLE comercios ADD COLUMN latitud REAL DEFAULT 13.7746")
+        except Exception: pass
+        try: cursor.execute("ALTER TABLE comercios ADD COLUMN longitud REAL DEFAULT -89.0244")
+        except Exception: pass
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+asegurar_columnas_mapa()
 
 class Credenciales(BaseModel):
     identificador: str
@@ -234,6 +250,7 @@ def viaje_repartidor(id_repartidor: int):
     conexion.row_factory = sqlite3.Row
     cursor = conexion.cursor()
     
+    # 🔥 CONSULTA ACTUALIZADA: Lee las coordenadas reales y actualizadas del comercio desde la tabla comercios[cite: 16]
     cursor.execute("""
         SELECT p.id_pedido, p.descripcion, p.total_pago, p.distancia_km, p.estado, 
                p.latitud_repartidor, p.longitud_repartidor, p.pin_recoleccion,
@@ -242,7 +259,8 @@ def viaje_repartidor(id_repartidor: int):
                COALESCE(c.direccion, 'Centro') AS comercio_direccion,
                COALESCE(u.direccion, 'Dirección no especificada') AS cliente_direccion,
                p.latitud_cliente, p.longitud_cliente,
-               13.7333 AS latitud_comercio, -89.1167 AS longitud_comercio
+               COALESCE(c.latitud, p.latitud_comercio, 13.7333) AS latitud_comercio, 
+               COALESCE(c.longitud, p.longitud_comercio, -89.1167) AS longitud_comercio
         FROM pedidos p 
         LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
         LEFT JOIN usuarios u ON p.id_cliente = u.id_usuario

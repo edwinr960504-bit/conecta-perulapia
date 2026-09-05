@@ -124,29 +124,50 @@ def enviar_soporte(req: TicketSoporte):
     conexion.close()
     return {"status": "ok", "mensaje": "Ticket abierto exitosamente."}
 
+# --- 1. REEMPLAZA LA FUNCIÓN DE HISTORIAL ACTUAL POR ESTA ---
 @router.get("/api/chat/historial/{id_pedido}/{canal}")
 @router.get("/api/chat/historial/{id_pedido}")
 def obtener_historial_chat(id_pedido: int, canal: str = "admin_cliente"):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
-    # 🔥 MARCAR COMO LEÍDO AL ABRIR: Borra la burbuja roja del menú
-    cursor.execute("""
-        UPDATE mensajes_chat SET leido = 1 
-        WHERE id_pedido = ? AND remitente != 'Admin Central'
-    """, (id_pedido,))
+    # Marcar como leído
+    cursor.execute("UPDATE mensajes_chat SET leido = 1 WHERE id_pedido = ? AND remitente != 'Admin Central'", (id_pedido,))
     conexion.commit()
     
-    cursor.execute("SELECT remitente, mensaje, evidencia, fecha, canal FROM mensajes_chat WHERE id_pedido = ? ORDER BY id_mensaje ASC", (id_pedido,))
+    # 🔥 AHORA SE EXTRAE EL id_mensaje (m[0])
+    cursor.execute("SELECT id_mensaje, remitente, mensaje, evidencia, fecha, canal FROM mensajes_chat WHERE id_pedido = ? ORDER BY id_mensaje ASC", (id_pedido,))
     filas = cursor.fetchall()
     
-    if not filas:
-        cursor.execute("SELECT 'Cliente', mensaje, evidencia, fecha, 'admin_cliente' FROM soporte WHERE id_pedido = ?", (id_pedido,))
-        filas = cursor.fetchall()
-
-    mensajes = [{"remitente": m[0], "mensaje": m[1], "evidencia": m[2], "fecha": m[3], "canal": m[4]} for m in filas]
+    mensajes = [{"id_mensaje": m[0], "remitente": m[1], "mensaje": m[2], "evidencia": m[3], "fecha": m[4], "canal": m[5]} for m in filas]
     conexion.close()
     return {"status": "ok", "mensajes": mensajes}
+
+# --- 2. AGREGA ESTOS 3 ENDPOINTS NUEVOS AL FINAL DEL ARCHIVO ---
+@router.delete("/api/chat/borrar_mensaje/{id_mensaje}")
+def borrar_un_mensaje(id_mensaje: int):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("DELETE FROM mensajes_chat WHERE id_mensaje = ?", (id_mensaje,))
+    conexion.commit(); conexion.close()
+    return {"status": "ok"}
+
+@router.delete("/api/chat/borrar_todo/{id_pedido}")
+def borrar_todo_chat(id_pedido: int):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (id_pedido,))
+    conexion.commit(); conexion.close()
+    return {"status": "ok"}
+
+@router.get("/api/cliente/notificaciones_chat")
+def notificaciones_cliente():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    # 🔥 Cuenta cuántos mensajes del admin no ha leído el cliente
+    cursor.execute("SELECT COUNT(*) FROM mensajes_chat WHERE leido = 0 AND remitente = 'Admin Central'")
+    count = cursor.fetchone()[0]
+    conexion.close()
+    return {"sin_leer": count}
 
 # ========================================================
 # 2. PANEL DE ADMINISTRACIÓN (NOTIFICACIONES Y ORDENAMIENTO)
@@ -404,3 +425,13 @@ def admin_eliminar_ticket(id_ticket: int):
     
     conexion.close()
     return {"status": "error", "mensaje": "Ticket no encontrado"}
+@router.get("/api/cliente/validar_pedido/{id_pedido}")
+def validar_pedido_existente(id_pedido: int):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("SELECT id_pedido FROM pedidos WHERE id_pedido = ?", (id_pedido,))
+    fila = cursor.fetchone()
+    conexion.close()
+    if fila:
+        return {"valido": True}
+    return {"valido": False}

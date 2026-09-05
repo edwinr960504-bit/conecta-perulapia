@@ -1,122 +1,93 @@
 import 'package:flutter/material.dart';
 
-class VistaDirecciones extends StatefulWidget {
-  const VistaDirecciones({super.key});
+class VistaDirecciones extends StatelessWidget {
+  final int idUsuario;
+  final String direccionActual;
 
-  @override
-  State<VistaDirecciones> createState() => _VistaDireccionesState();
-}
-
-class _VistaDireccionesState extends State<VistaDirecciones> {
-  // Lista de direcciones (puedes empezar con una vacía o dejar la que tenías)
-  final List<Map<String, String>> _direcciones = [
-    {
-      "titulo": "Casa",
-      "detalle": "Centro de San Bartolomé Perulapía, frente al parque",
-      "referencia": "Casa de portón negro",
-    },
-  ];
-
-  // Función para abrir la ventanita y agregar la dirección real
-  void _mostrarFormulario() {
-    final TextEditingController tituloCtrl = TextEditingController();
-    final TextEditingController detalleCtrl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Agregar Dirección"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: tituloCtrl,
-              decoration: const InputDecoration(
-                labelText: "Alias (ej. Trabajo, Casa)",
-              ),
-            ),
-            TextField(
-              controller: detalleCtrl,
-              decoration: const InputDecoration(labelText: "Dirección exacta"),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancelar"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E3A8A),
-            ),
-            onPressed: () {
-              if (tituloCtrl.text.isNotEmpty && detalleCtrl.text.isNotEmpty) {
-                setState(() {
-                  _direcciones.add({
-                    "titulo": tituloCtrl.text,
-                    "detalle": detalleCtrl.text,
-                    "referencia": "Sin referencia",
-                  });
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Guardar", style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
+  const VistaDirecciones(
+      {super.key,
+      this.idUsuario = 0,
+      this.direccionActual = "Sin dirección registrada"});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
-        title: const Text("Mis Direcciones"),
+        title: const Text("Mi Dirección"),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
       ),
-      body: _direcciones.isEmpty
-          ? const Center(child: Text("No tienes direcciones guardadas."))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _direcciones.length,
-              itemBuilder: (context, index) {
-                final dir = _direcciones[index];
-                return Card(
-                  elevation: 3,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ListTile(
-                    leading: const Icon(
-                      Icons.location_on,
-                      color: Color(0xFF1E3A8A),
-                      size: 30,
-                    ),
-                    title: Text(
-                      dir['titulo']!,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(dir['detalle']!),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () =>
-                          setState(() => _direcciones.removeAt(index)),
-                    ),
-                  ),
-                );
-              },
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Dirección Principal de Entrega",
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87),
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF1E3A8A),
-        onPressed: _mostrarFormulario,
-        icon: const Icon(Icons.add_location, color: Colors.white),
-        label: const Text(
-          "Nueva Dirección",
-          style: TextStyle(color: Colors.white),
+            const SizedBox(height: 8),
+            const Text(
+              "Esta es la ubicación oficial a donde llegarán tus pedidos. Para modificarla, utiliza el botón de edición.",
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
+
+            // TARJETA DE LA DIRECCIÓN CON EL LAPICITO
+            Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15)),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E3A8A).withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.home,
+                          color: Color(0xFF1E3A8A), size: 30),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Casa / Ubicación actual",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            direccionActual.isEmpty
+                                ? "Sin dirección"
+                                : direccionActual,
+                            style: const TextStyle(
+                                color: Colors.black54, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // EL LAPICITO QUE REDIRIGE AL EDITOR PRINCIPAL
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Colors.blue),
+                      onPressed: () {
+                        Navigator.pop(context);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

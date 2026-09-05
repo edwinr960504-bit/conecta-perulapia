@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'dart:async';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'vista_login.dart';
 import 'carrito_service.dart';
@@ -42,16 +41,24 @@ class _VistaRepartidorState extends State<VistaRepartidor> {
   @override
   void initState() {
     super.initState();
-    _verificarYPedirPermisosGPS();
+    _activarGPSMotorista();
   }
 
-  Future<void> _verificarYPedirPermisosGPS() async {
-    var status = await Permission.location.status;
-    if (!status.isGranted) {
-      var resultado = await Permission.location.request();
-      if (resultado.isPermanentlyDenied) {
-        openAppSettings();
-      }
+  // 🔥 LÓGICA RESTAURADA: Exige GPS nativo apenas entra el motorista
+  Future<void> _activarGPSMotorista() async {
+    bool servicioHabilitado = await Geolocator.isLocationServiceEnabled();
+    if (!servicioHabilitado) {
+      await Geolocator.openLocationSettings();
+      return;
+    }
+
+    LocationPermission permiso = await Geolocator.checkPermission();
+    if (permiso == LocationPermission.denied) {
+      permiso = await Geolocator.requestPermission();
+    }
+
+    if (permiso == LocationPermission.deniedForever) {
+      await Geolocator.openAppSettings();
     }
   }
 
@@ -227,7 +234,7 @@ class _RepaRadarState extends State<RepaRadar>
       _cargarBolsa();
     }
 
-    // 🔥 EL MOTOR TURBO A 2 SEGUNDOS 🔥
+    // 🔥 EL MOTOR TURBO A 2 SEGUNDOS
     _temporizador = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (widget.radarActivo && mounted) {
         _obtenerMiGPS();
@@ -243,22 +250,16 @@ class _RepaRadarState extends State<RepaRadar>
     super.dispose();
   }
 
+  // 🔥 EXTRACCIÓN DE GPS RÁPIDA: Ya no vuelve a pedir permisos, solo extrae coordenadas puras
   Future<void> _obtenerMiGPS() async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.whileInUse ||
-          permission == LocationPermission.always) {
-        Position pos = await Geolocator.getCurrentPosition(
-            locationSettings:
-                const LocationSettings(accuracy: LocationAccuracy.high));
-        if (mounted) {
-          setState(() {
-            _miUbicacionReal = LatLng(pos.latitude, pos.longitude);
-          });
-        }
+      Position pos = await Geolocator.getCurrentPosition(
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.best));
+      if (mounted) {
+        setState(() {
+          _miUbicacionReal = LatLng(pos.latitude, pos.longitude);
+        });
       }
     } catch (e) {
       debugPrint("Error sacando GPS real: $e");
@@ -382,7 +383,7 @@ class _RepaRadarState extends State<RepaRadar>
                   Text(
                       _miUbicacionReal != null
                           ? "Estás a ${distanciaAprox.toStringAsFixed(2)} km del restaurante"
-                          : "Distancia al cliente: ${pedido['distancia_km']} km",
+                          : "Calculando GPS...",
                       style: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w500)),
                 ],
@@ -637,8 +638,6 @@ class _RepaRadarState extends State<RepaRadar>
                       const Center(
                           child: CircularProgressIndicator(
                               color: Color(0xFF0F766E))),
-
-                    // Botones de Zoom y Centrar GPS
                     Positioned(
                       bottom: 180,
                       right: 15,
@@ -681,8 +680,6 @@ class _RepaRadarState extends State<RepaRadar>
                         ],
                       ),
                     ),
-
-                    // Lista de tarjetas horizontal
                     if (_pedidosDisponibles.isNotEmpty)
                       Positioned(
                         bottom: 15,
