@@ -320,9 +320,12 @@ def eliminar_producto(del_req: EliminarProducto):
 def comercios_activos():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
+    # 🔥 AHORA SÍ EXTRAEMOS LA LATITUD, LONGITUD Y HORARIOS REALES
     cursor.execute("""
         SELECT id_comercio, COALESCE(nombre_local, 'Comercio'), COALESCE(direccion, 'Sin dirección'), 
-               COALESCE(logo, 'Sin logo'), COALESCE(tipo_plan, 'comision') 
+               COALESCE(logo, 'Sin logo'), COALESCE(tipo_plan, 'comision'),
+               COALESCE(latitud, 13.7746), COALESCE(longitud, -89.0244),
+               COALESCE(horarios, 'Horario no definido')
         FROM comercios WHERE estado = 'activo' ORDER BY nombre_local ASC
     """)
     locales = cursor.fetchall()
@@ -346,6 +349,9 @@ def comercios_activos():
             "direccion": l[2],
             "logo": l[3],
             "tipo_plan": l[4],
+            "latitud": l[5],
+            "longitud": l[6],
+            "horarios": l[7],
             "fotos_productos": fotos_prods
         })
     conexion.close()

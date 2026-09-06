@@ -72,7 +72,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
   Future<void> _trazarRutaWaze() async {
     try {
       final url = Uri.parse(
-          'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionDestino.longitude},${_ubicacionDestino.latitude}?geometries=geojson');
+          'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionDestino.longitude},${_ubicacionDestino.latitude}?geometries=geojson&overview=full');
 
       final res = await http.get(url).timeout(const Duration(seconds: 4));
 

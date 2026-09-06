@@ -68,6 +68,29 @@ def radar_despacho():
         "total": r[3], "distancia": r[4], "repartidor": r[5], 
         "comercio": r[6], "lat": r[7], "lon": r[8]
     } for r in rutas]
+@router.get("/api/admin/flota_activa")
+def flota_activa():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    # 🔥 EXTRAEMOS LA FOTO Y TELÉFONO DEL MOTORISTA
+    cursor.execute("""
+        SELECT DISTINCT p.id_repartidor, p.latitud_repartidor, p.longitud_repartidor, 
+               u.nombre, COALESCE(u.foto_perfil, 'Sin foto'), COALESCE(u.telefono, 'Sin teléfono')
+        FROM pedidos p
+        JOIN usuarios u ON p.id_repartidor = u.id_usuario
+        WHERE p.estado IN ('asignado', 'en_camino') AND p.latitud_repartidor != 0
+    """)
+    flota = cursor.fetchall()
+    conexion.close()
+    
+    return [{
+        "id_repartidor": r[0], 
+        "latitud": r[1], 
+        "longitud": r[2], 
+        "nombre": r[3],
+        "foto": r[4],
+        "telefono": r[5]
+    } for r in flota]
 
 # ========================================================
 # 2. FINANZAS Y CORTE DE CAJA

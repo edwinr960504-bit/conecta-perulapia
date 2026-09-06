@@ -29,6 +29,35 @@ class _MapaComercianteScreenState extends State<MapaComercianteScreen>
   bool _motoristaEnCamino = false;
   Timer? _timerMonitoreo;
   String _distanciaYtiempo = "Buscando repartidor...";
+  List<LatLng> _rutaCalles = []; // 🔥 Nueva variable para guardar las calles
+
+  // 🔥 NUEVA FUNCIÓN: Traza la ruta en las calles para el comercio
+  Future<void> _trazarRutaWaze() async {
+    try {
+      final url = Uri.parse(
+          'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionLocal.longitude},${_ubicacionLocal.latitude}?geometries=geojson&overview=full');
+
+      final res = await http.get(url).timeout(const Duration(seconds: 4));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final coordenadasRaw = data['routes'][0]['geometry']['coordinates'];
+
+        List<LatLng> puntos = [];
+        for (var coord in coordenadasRaw) {
+          puntos.add(LatLng(coord[1], coord[0]));
+        }
+
+        if (mounted) {
+          setState(() {
+            _rutaCalles = puntos;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("⚠️ No se pudo trazar la ruta del motorista: $e");
+    }
+  }
 
   late AnimationController _animController;
   final MapController _mapController = MapController();
@@ -88,6 +117,17 @@ class _MapaComercianteScreenState extends State<MapaComercianteScreen>
           _ubicacionLocal = LatLng(latLoc, lonLoc);
         }
 
+        if (latLoc != 0.0 && lonLoc != 0.0) {
+          bool eraLaPrimeraVez =
+              _cargando; // Verificamos si apenas va abriendo el mapa
+          _ubicacionLocal = LatLng(latLoc, lonLoc);
+
+          // Si acaba de abrir, centramos el mapa de un solo golpe en su local real
+          if (eraLaPrimeraVez) {
+            _mapController.move(_ubicacionLocal, 16.0);
+          }
+        }
+
         if (latRep != 0.0 && lonRep != 0.0) {
           LatLng nuevaPosRepartidor = LatLng(latRep, lonRep);
 
@@ -96,7 +136,7 @@ class _MapaComercianteScreenState extends State<MapaComercianteScreen>
           double metros = distCalculator.as(
               LengthUnit.Meter, _ubicacionLocal, nuevaPosRepartidor);
           double km = metros / 1000;
-          int minutos = (km * 3).ceil(); // Cálculo estimado de minutos urbanos
+          int minutos = (km * 3).ceil();
 
           if (mounted) {
             setState(() {
@@ -106,6 +146,9 @@ class _MapaComercianteScreenState extends State<MapaComercianteScreen>
               _distanciaYtiempo =
                   "A ${km.toStringAsFixed(2)} km • Llega en aprox. $minutos min";
             });
+
+            // 🔥 Llamamos a OSRM para trazar las calles
+            _trazarRutaWaze();
           }
         }
       }
@@ -147,6 +190,9 @@ class _MapaComercianteScreenState extends State<MapaComercianteScreen>
 
   @override
   Widget build(BuildContext context) {
+    // 🔥 Aquí es donde usamos la variable para quitar el error:
+    List<LatLng> puntosRutaFinal = _rutaCalles.isNotEmpty ? _rutaCalles : [];
+
     return Scaffold(
       appBar: AppBar(
         title: Text("Viene por Orden #${widget.numeroOrden}",
@@ -169,13 +215,15 @@ class _MapaComercianteScreenState extends State<MapaComercianteScreen>
                 tileProvider: NetworkTileProvider(),
               ),
               // Línea que une al local con la moto
+              // Línea que une al local con la moto
               if (_motoristaEnCamino)
                 PolylineLayer(
                   polylines: [
                     Polyline(
-                      points: [_ubicacionLocal, _ubicacionMotorista],
+                      points:
+                          puntosRutaFinal, // ✅ Cámbialo por la nueva variable
                       color: Colors.orange.shade800,
-                      strokeWidth: 5.0,
+                      strokeWidth: 6.0,
                     ),
                   ],
                 ),

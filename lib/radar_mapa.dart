@@ -37,6 +37,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
   bool _cargando = true;
   Timer? _timerMonitoreo;
 
+  // Variables en tiempo real para el cálculo inteligente
   String _distanciaYtiempo = "Calculando ruta...";
   List<LatLng> _rutaCalles = [];
 
@@ -48,6 +49,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
     super.initState();
     _ubicacionDestino = LatLng(widget.latDestino, widget.lonDestino);
 
+    // Animación para el marcador del mapa
     _blinkController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -55,7 +57,8 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
 
     _obtenerUbicacionReal();
 
-    _timerMonitoreo = Timer.periodic(const Duration(seconds: 3), (timer) {
+    // Actualiza la ubicación y recálcula la distancia periódicamente
+    _timerMonitoreo = Timer.periodic(const Duration(seconds: 4), (timer) {
       _obtenerUbicacionReal();
     });
   }
@@ -67,10 +70,11 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
     super.dispose();
   }
 
-  Future<void> _trazarRutaOSRM() async {
+  // 🔥 Trazador de Calles Inteligente (OSRM) 🔥
+  Future<void> _trazarRutaWaze() async {
     try {
       final url = Uri.parse(
-          'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionDestino.longitude},${_ubicacionDestino.latitude}?geometries=geojson');
+          'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionDestino.longitude},${_ubicacionDestino.latitude}?geometries=geojson&overview=full');
 
       final res = await http.get(url).timeout(const Duration(seconds: 4));
 
@@ -80,7 +84,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
 
         List<LatLng> puntos = [];
         for (var coord in coordenadasRaw) {
-          puntos.add(LatLng(coord[1], coord[0]));
+          puntos.add(LatLng(coord[1], coord[0])); // OSRM devuelve [lon, lat]
         }
 
         if (mounted) {
@@ -90,35 +94,41 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
         }
       }
     } catch (e) {
-      debugPrint("⚠️ No se pudo trazar la ruta por carretera: $e");
+      debugPrint("⚠️ No se pudo trazar la ruta de calles: $e");
     }
   }
 
-  // 🔥 EXTRACCIÓN DIRECTA: GPS de alta precisión en tiempo real
   Future<void> _obtenerUbicacionReal() async {
     try {
-      Position pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.best),
-      );
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        Position pos = await Geolocator.getCurrentPosition(
+          locationSettings:
+              const LocationSettings(accuracy: LocationAccuracy.high),
+        );
 
-      if (mounted) {
-        LatLng nuevaPos = LatLng(pos.latitude, pos.longitude);
+        if (mounted) {
+          LatLng nuevaPos = LatLng(pos.latitude, pos.longitude);
 
-        const Distance dist = Distance();
-        double km =
-            dist.as(LengthUnit.Meter, nuevaPos, _ubicacionDestino) / 1000;
-        int minutos = (km * 3).ceil();
+          // CÁLCULO DE ETA EN TIEMPO REAL
+          const Distance dist = Distance();
+          double km =
+              dist.as(LengthUnit.Meter, nuevaPos, _ubicacionDestino) / 1000;
+          int minutos = (km * 3).ceil(); // Aprox 3 mins por KM
 
-        setState(() {
-          _ubicacionMotorista = nuevaPos;
-          _cargando = false;
-          _distanciaYtiempo =
-              "A ${km.toStringAsFixed(2)} km • Llegada en $minutos min";
-        });
+          setState(() {
+            _ubicacionMotorista = nuevaPos;
+            _cargando = false;
+            _distanciaYtiempo =
+                "A ${km.toStringAsFixed(2)} km • Llegada en $minutos min";
+          });
 
-        // Llamamos al buscador de rutas por carretera
-        _trazarRutaOSRM();
+          _trazarRutaWaze();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -130,6 +140,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
     }
   }
 
+  // CONTROLES DE CÁMARA
   void _centrarEnMoto() {
     _mapController.move(_ubicacionMotorista, 17.0);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -145,15 +156,16 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
   }
 
   void _zoomIn() {
-    final zoomActual = _mapController.camera.zoom;
-    _mapController.move(_mapController.camera.center, zoomActual + 1.0);
+    _mapController.move(
+        _mapController.camera.center, _mapController.camera.zoom + 1.0);
   }
 
   void _zoomOut() {
-    final zoomActual = _mapController.camera.zoom;
-    _mapController.move(_mapController.camera.center, zoomActual - 1.0);
+    _mapController.move(
+        _mapController.camera.center, _mapController.camera.zoom - 1.0);
   }
 
+  // DIÁLOGO PARA ENTREGAR EL PEDIDO
   void _mostrarDialogoEntrega(BuildContext context) {
     if (widget.faseRecoleccion) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -219,7 +231,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                     ),
                   );
                   GpsService.apagarGps();
-                  Navigator.pop(context);
+                  Navigator.pop(context); // Regresa a la pantalla anterior
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -270,6 +282,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.perulapia_connect',
               ),
+              // Ruta dibujada inteligentemente sobre las calles
               PolylineLayer(
                 polylines: [
                   Polyline(
@@ -332,42 +345,51 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
             ],
           ),
 
-          // Botones flotantes
+          // BOTONES FLOTANTES
           Positioned(
             right: 16,
-            bottom: 230,
+            bottom: widget.faseRecoleccion ? 170 : 230,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 FloatingActionButton(
-                  heroTag: "zoom_in_mapa_repa",
+                  heroTag: "btnZoomInRepa",
                   mini: true,
                   backgroundColor: Colors.white,
-                  foregroundColor: Colors.black87,
+                  foregroundColor: widget.faseRecoleccion
+                      ? Colors.orange.shade800
+                      : Colors.blue.shade800,
+                  elevation: 4,
                   onPressed: _zoomIn,
-                  child: const Icon(Icons.add, size: 20),
+                  child: const Icon(Icons.add),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
-                  heroTag: "zoom_out_mapa_repa",
+                  heroTag: "btnZoomOutRepa",
                   mini: true,
                   backgroundColor: Colors.white,
-                  foregroundColor: Colors.black87,
+                  foregroundColor: widget.faseRecoleccion
+                      ? Colors.orange.shade800
+                      : Colors.blue.shade800,
+                  elevation: 4,
                   onPressed: _zoomOut,
-                  child: const Icon(Icons.remove, size: 20),
+                  child: const Icon(Icons.remove),
                 ),
                 const SizedBox(height: 16),
                 FloatingActionButton(
-                  heroTag: "centrar_moto_mapa_repa",
+                  heroTag: "btnCentrarMotoRepa",
                   backgroundColor: Colors.black87,
                   foregroundColor: Colors.white,
+                  elevation: 4,
                   onPressed: _centrarEnMoto,
+                  tooltip: "Centrar en mi ubicación",
                   child: const Icon(Icons.my_location),
                 ),
               ],
             ),
           ),
 
+          // PANEL INFERIOR Y BOTÓN DE ENTREGA
           Positioned(
             bottom: 20,
             left: 16,
@@ -391,7 +413,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 12.0),
+                          horizontal: 16.0, vertical: 14.0),
                       child: Row(
                         children: [
                           FadeTransition(
@@ -408,7 +430,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                                   color: widget.faseRecoleccion
                                       ? Colors.orange.shade800
                                       : Colors.blue.shade800,
-                                  size: 26),
+                                  size: 28),
                             ),
                           ),
                           const SizedBox(width: 14),
@@ -421,12 +443,12 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                                   "Destino: ${widget.nombreDestino}",
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 15,
+                                      fontSize: 16,
                                       color: Colors.black87),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(height: 4),
                                 Text(
                                   _distanciaYtiempo,
                                   style: TextStyle(
@@ -434,7 +456,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                                       color: widget.faseRecoleccion
                                           ? Colors.orange.shade800
                                           : Colors.blue.shade800,
-                                      fontSize: 13),
+                                      fontSize: 14),
                                 ),
                               ],
                             ),
@@ -450,6 +472,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                     ),
                   ),
                 ),
+                // Muestra el botón solo si NO estamos en fase de recolección
                 if (!widget.faseRecoleccion) ...[
                   const SizedBox(height: 10),
                   SizedBox(
