@@ -58,11 +58,14 @@ def repartidor_toma_pedido(req: TomarPedido):
         WHERE id_pedido = ? AND (id_repartidor IS NULL OR id_repartidor = 0)
     """, (req.id_repartidor, req.id_pedido))
     filas = cursor.rowcount
-    conexion.commit(); conexion.close()
     
     if filas == 0: 
+        conexion.rollback()
+        conexion.close()
         return {"status": "error", "mensaje": "Viaje no disponible. Ya fue tomado por otro compañero."}
-    return {"status": "ok", "mensaje": "¡Viaje asignado y bloqueado para ti! Ve al restaurante."}
+        
+    conexion.commit(); conexion.close()
+    return {"status": "ok", "mensaje": "¡Viaje asignado y bloqueado para ti! Ve al restaurante de forma permanente."}
 
 @router.post("/recoger_pedido")
 @router.post("/api/recoger_pedido")
@@ -82,9 +85,15 @@ async def recoger_en_local(request: Request):
         return {"status": "error", "mensaje": f"PIN incorrecto. (Escribiste: {pin_ingresado})"}
     
     cursor.execute("UPDATE pedidos SET estado = 'en_camino' WHERE id_pedido = ?", (id_orden,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Pedido no encontrado para recolección."}
+
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "¡PIN Correcto! El pedido va en camino al cliente."}
+    return {"status": "ok", "mensaje": "¡PIN Correcto! El pedido va en camino al cliente guardado en disco."}
 
 @router.post("/entregar_pedido")
 @router.post("/api/entregar_pedido")
@@ -102,8 +111,13 @@ def entregar_a_cliente(req: ValidarPin):
         WHERE id_pedido = ?
     """, (fecha_actual, req.id_pedido))
     
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "No se pudo registrar la entrega del pedido."}
+
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": "¡Entrega completada! Dinero sumado a tu billetera personal."}
+    return {"status": "ok", "mensaje": "¡Entrega completada! Dinero sumado a tu billetera personal de forma permanente."}
     
 @router.post("/actualizar_gps")
 @router.post("/api/actualizar_gps")
@@ -185,8 +199,14 @@ def borrar_movimiento_repartidor(datos: dict):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_pedido = ?", (id_pedido,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Movimiento no encontrado."}
+
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": "Movimiento archivado de tu historial personal"}
+    return {"status": "ok", "mensaje": "Movimiento archivado permanentemente de tu historial personal"}
 
 @router.post("/api/repartidor/limpiar_todo/{id_repartidor}")
 def limpiar_todo_repartidor(id_repartidor: int):
@@ -195,4 +215,4 @@ def limpiar_todo_repartidor(id_repartidor: int):
     # 🔥 LIMPIEZA PRIVADA: Solo borra los viajes que tengan exactamente su ID
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_repartidor = ? AND estado = 'entregado'", (id_repartidor,))
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": "Historial personal limpiado con éxito"}
+    return {"status": "ok", "mensaje": "Historial personal limpiado permanentemente con éxito"}

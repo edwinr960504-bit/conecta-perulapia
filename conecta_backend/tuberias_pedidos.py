@@ -120,7 +120,7 @@ def crear_pedido(p: PedidoNuevo):
     
     return {
         "status": "ok", 
-        "mensaje": f"Pedido enviado exitosamente", 
+        "mensaje": f"Pedido enviado exitosamente de forma permanente", 
         "id_pedido": orden_id,
         "codigo_rastreo": codigo_rastreo,
         "total_pago": total
@@ -167,8 +167,14 @@ def comercio_acepta(req: AccionComercio):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'preparacion', tiempo_preparacion = ? WHERE id_pedido = ?", (tiempo_cocina, id_orden))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Pedido no encontrado para aceptar."}
+
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": f"Orden aceptada en cocina."}
+    return {"status": "ok", "mensaje": f"Orden aceptada en cocina permanentemente."}
 
 @router.post("/comercio_pedido_listo")
 @router.post("/comercio_pedido_listo/")
@@ -179,8 +185,14 @@ def comercio_pedido_listo(req: AccionComercio):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'listo_recoleccion' WHERE id_pedido = ? AND estado = 'preparacion'", (id_orden,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "No se pudo actualizar el estado a listo."}
+
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": "¡Comida lista para recolección!"}
+    return {"status": "ok", "mensaje": "¡Comida lista para recolección en disco!"}
 
 @router.get("/api/pedidos_activos/cliente/{id_cliente}")
 def radar_del_cliente(id_cliente: int):
@@ -302,22 +314,77 @@ def cancelar_pedido(id_pedido: int):
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     try:
         cursor.execute("DELETE FROM pedidos WHERE id_pedido = ? AND estado = 'pendiente'", (id_pedido,))
+        
+        if cursor.rowcount == 0:
+            conexion.rollback()
+            conexion.close()
+            return {"status": "error", "mensaje": "No se pudo cancelar el pedido."}
+
         conexion.commit(); conexion.close()
-        return {"status": "ok", "mensaje": "Pedido eliminado"}
+        return {"status": "ok", "mensaje": "Pedido eliminado permanentemente"}
     except Exception as e:
-        return {"status": "error"}
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": str(e)}
 
 @router.post("/api/cliente/borrar_historial")
 def borrar_historial_cliente(datos: dict):
     id_pedido = datos.get("id_pedido")
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_pedido = ? AND estado IN ('entregado', 'cancelado')", (id_pedido,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Pedido no encontrado en el historial."}
+
     conexion.commit(); conexion.close()
-    return {"status": "ok"}
+    return {"status": "ok", "mensaje": "Historial de pedido actualizado permanentemente"}
 
 @router.post("/api/cliente/limpiar_todo/{id_cliente}")
 def limpiar_todo_cliente(id_cliente: int):
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_cliente = ? AND estado IN ('entregado', 'cancelado')", (id_cliente,))
     conexion.commit(); conexion.close()
-    return {"status": "ok"}
+    return {"status": "ok", "mensaje": "Historial del cliente limpiado permanentemente"}
+
+@router.get("/pedidos_disponibles")
+@router.get("/pedidos_disponibles/")
+@router.get("/api/pedidos_disponibles")
+@router.get("/api/pedidos_disponibles/")
+def pedidos_disponibles():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("""
+        SELECT p.id_pedido, p.descripcion, p.precio_comida, p.total_pago, p.estado, p.fecha,
+               COALESCE(c.nombre_local, 'Comercio Local'), p.id_comercio,
+               c.latitud, c.longitud, p.latitud_comercio, p.longitud_comercio,
+               p.distancia_km, p.tarifa_envio, p.codigo_rastreo, p.numero_diario
+        FROM pedidos p 
+        LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
+        WHERE p.estado IN ('preparacion', 'listo_recoleccion', 'pendiente') 
+          AND (p.id_repartidor = 0 OR p.id_repartidor IS NULL)
+        ORDER BY p.id_pedido ASC
+    """)
+    filas = cursor.fetchall()
+    conexion.close()
+    
+    resultado = []
+    for r in filas:
+        resultado.append({
+            "id_pedido": r[0],
+            "numero_orden": r[15] or r[0],
+            "codigo_rastreo": r[14] or "CP-0000",
+            "descripcion": r[1],
+            "precio_comida": r[2],
+            "total_pago": r[3],
+            "ganancia_envio": r[13] or 1.00,
+            "estado": r[4],
+            "fecha": r[5],
+            "negocio": r[6],
+            "id_comercio": r[7],
+            "latitud_comercio": r[10] if (r[10] is not None and r[10] != 0.0) else (r[8] or 13.7746),
+            "longitud_comercio": r[11] if (r[11] is not None and r[11] != 0.0) else (r[9] or -89.0244),
+            "distancia_km": r[12] or 1.0
+        })
+    return resultado

@@ -33,9 +33,14 @@ class _VistaComercianteState extends State<VistaComerciante> {
   bool _localAbierto = false;
   String? _urlLogoComercio;
 
+  // 🔥 Variable mutable para que el nombre cambie en tiempo real
+  late String _nombreActualComercio;
+
   @override
   void initState() {
     super.initState();
+    _nombreActualComercio =
+        widget.nombreComercio; // Inicializamos con el que vino al entrar
     _sincronizarEstadoReal();
     _cargarLogoComercio();
   }
@@ -43,7 +48,8 @@ class _VistaComercianteState extends State<VistaComerciante> {
   // 🔥 SINCRONIZACIÓN DIRECTA Y PRECISA CON EL PERFIL EXCLUSIVO DEL COMERCIO
   Future<void> _sincronizarEstadoReal() async {
     try {
-      final url = Uri.parse('$urlCentral/api/comercio/perfil/${widget.idComercio}');
+      final url =
+          Uri.parse('$urlCentral/api/comercio/perfil/${widget.idComercio}');
       final res = await http.get(url).timeout(const Duration(seconds: 5));
       if (res.statusCode == 200 && mounted) {
         final data = json.decode(utf8.decode(res.bodyBytes));
@@ -52,7 +58,8 @@ class _VistaComercianteState extends State<VistaComerciante> {
           setState(() {
             _localAbierto = (estado == 'activo');
           });
-          debugPrint("✅ Estado real del local sincronizado: $estado (Abierto: $_localAbierto)");
+          debugPrint(
+              "✅ Estado real del local sincronizado: $estado (Abierto: $_localAbierto)");
         }
       }
     } catch (e) {
@@ -101,13 +108,14 @@ class _VistaComercianteState extends State<VistaComerciante> {
       ),
       SoporteComercioPantalla(
         idComercio: widget.idComercio,
-        nombreComercio: widget.nombreComercio,
+        nombreComercio: _nombreActualComercio,
       ),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Panel: ${widget.nombreComercio}"),
+        title: Text(
+            "Panel: $_nombreActualComercio"), // 🔥 Actualizado al nombre dinámico
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
         elevation: 0,
@@ -135,7 +143,7 @@ class _VistaComercianteState extends State<VistaComerciante> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    widget.nombreComercio,
+                    _nombreActualComercio, // 🔥 Actualizado al nombre dinámico
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 20,
@@ -176,15 +184,27 @@ class _VistaComercianteState extends State<VistaComerciante> {
               subtitle: const Text('Fotos, Nombre, Horarios...'),
               onTap: () async {
                 Navigator.pop(context);
-                await Navigator.push(
+
+                // 🔥 Capturamos lo que nos devuelve la pantalla de ajustes
+                final nuevoNombre = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => VistaAjustesLocal(
                       idComercio: widget.idComercio,
-                      nombreActual: widget.nombreComercio,
+                      nombreActual: _nombreActualComercio,
                     ),
                   ),
                 );
+
+                // 🔥 Si regresó un nombre válido, actualizamos el estado visual al instante
+                if (nuevoNombre != null &&
+                    nuevoNombre is String &&
+                    nuevoNombre.isNotEmpty) {
+                  setState(() {
+                    _nombreActualComercio = nuevoNombre;
+                  });
+                }
+
                 _cargarLogoComercio();
               },
             ),

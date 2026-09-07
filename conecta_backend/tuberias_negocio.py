@@ -140,12 +140,14 @@ async def subir_foto_comercio(id_comercio: str = Form(...), file: UploadFile = F
     cursor = conexion.cursor()
     cursor.execute("UPDATE comercios SET logo = ? WHERE id_comercio = ?", (url_relativa, id_comercio))
     filas = cursor.rowcount
-    conexion.commit()
-    conexion.close()
     
     if filas == 0:
+        conexion.rollback()
+        conexion.close()
         return {"status": "error", "mensaje": "ID de Comercio fantasma. No se pudo guardar la foto."}
         
+    conexion.commit()
+    conexion.close()
     return {"status": "ok", "url": url_relativa}
 
 @router.get("/api/comercio/perfil/{id_comercio}")
@@ -203,12 +205,15 @@ def actualizar_perfil_comercio(datos: dict):
         """, (nombre, direccion, horarios, id_comercio))
         
     filas = cursor.rowcount
-    conexion.commit()
-    conexion.close()
     
     if filas == 0:
+        conexion.rollback()
+        conexion.close()
         return {"status": "error", "mensaje": "ID de comercio fantasma. Actualización bloqueada."}
-    return {"status": "ok", "mensaje": "Perfil y ubicación exacta actualizados correctamente"}
+        
+    conexion.commit()
+    conexion.close()
+    return {"status": "ok", "mensaje": "Perfil y ubicación exacta actualizados correctamente de forma permanente"}
 
 # ========================================================
 # 2. GESTIÓN DE FOTOGRAFÍAS Y MENÚS DE PLATILLOS
@@ -230,6 +235,12 @@ async def subir_foto_producto(id_producto: int = Form(...), file: UploadFile = F
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE productos SET foto_platillo = ? WHERE id_producto = ?", (url_relativa, id_producto))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Producto no encontrado."}
+
     conexion.commit()
     conexion.close()
     return {"status": "ok", "url": url_relativa}
@@ -273,7 +284,7 @@ def agregar_producto(p: ProductoNuevo):
     id_prod = cursor.lastrowid
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Platillo agregado", "id_producto": id_prod, "id_identidad": f"P-{id_prod}"}
+    return {"status": "ok", "mensaje": "Platillo agregado permanentemente", "id_producto": id_prod, "id_identidad": f"P-{id_prod}"}
 
 @router.post("/actualizar_producto")
 @router.post("/actualizar_producto/")
@@ -294,9 +305,15 @@ def actualizar_producto(ep: EstadoProducto):
             SET disponible = ?, precio = ? 
             WHERE id_producto = ?
         """, (ep.disponible, ep.precio, ep.id_producto))
+        
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Producto no encontrado."}
+
     conexion.commit()
     conexion.close()
-    return {"status": "ok"}
+    return {"status": "ok", "mensaje": "Producto actualizado permanentemente"}
 
 @router.post("/eliminar_producto")
 @router.post("/eliminar_producto/")
@@ -306,9 +323,15 @@ def eliminar_producto(del_req: EliminarProducto):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM productos WHERE id_producto = ?", (del_req.id_producto,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Producto no encontrado."}
+
     conexion.commit()
     conexion.close()
-    return {"status": "ok"}
+    return {"status": "ok", "mensaje": "Producto eliminado permanentemente"}
 
 # ========================================================
 # 3. DIRECTORIO Y ENDPOINT DE ESTADO BLINDADO CON PREFIJO C
@@ -380,7 +403,7 @@ def cambiar_estado(id_comercio: str, datos: dict):
     conexion.commit()
     conexion.close()
     
-    return {"status": "ok", "abierto": (nuevo_estado == "activo"), "mensaje": "Estado de categoría C actualizado correctamente"}
+    return {"status": "ok", "abierto": (nuevo_estado == "activo"), "mensaje": "Estado de categoría C actualizado correctamente de forma permanente"}
 
 @router.get("/billetera/comercio/{id_comercio}")
 @router.get("/api/billetera/comercio/{id_comercio}")

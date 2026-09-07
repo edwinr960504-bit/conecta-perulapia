@@ -19,21 +19,19 @@ class _RepaPerfilState extends State<RepaPerfil> {
   bool _cargando = true;
   bool _guardando = false;
 
-  // === Datos Reales de la BD (Adiós a la clonación) ===
+  // === Datos Reales de la BD ===
   String _nombre = "Cargando...";
-  final String _dui = "Protegido"; // 🔥 Corregido: Agregado 'final'
+  final String _dui = "Protegido";
   String _fotoPerfil = "";
 
-  // === Campos editables originales tuyos ===
+  // === Campos editables ===
   final TextEditingController telefonoCtrl = TextEditingController();
   final TextEditingController correoCtrl = TextEditingController();
   final TextEditingController colorVehiculoCtrl = TextEditingController();
   final TextEditingController placaCtrl = TextEditingController();
-
-  // Campo adicional para guardar la dirección en BD
   final TextEditingController direccionCtrl = TextEditingController();
 
-  // === Lógica de evolución de vehículo (Mantenida intacta) ===
+  // === Lógica de vehículo ===
   String tipoVehiculoOriginal = 'Bicicleta';
   late String tipoVehiculoSeleccionado;
 
@@ -71,7 +69,7 @@ class _RepaPerfilState extends State<RepaPerfil> {
     }
   }
 
-  // 🔥 SUBIR FOTO DE PERFIL DE MANERA INDIVIDUAL
+  // 🔥 SUBIR FOTO DE PERFIL
   Future<void> _cambiarFotoPerfil() async {
     final XFile? fotoSeleccionada = await _picker.pickImage(
       source: ImageSource.gallery,
@@ -89,7 +87,7 @@ class _RepaPerfilState extends State<RepaPerfil> {
 
         var res = await request.send();
         if (res.statusCode == 200) {
-          if (!mounted) return; // 🔥 Corregido: Validación de context síncrono
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text("📸 Foto de perfil actualizada"),
@@ -106,27 +104,37 @@ class _RepaPerfilState extends State<RepaPerfil> {
     }
   }
 
-  // 🔥 GUARDAR LOS CAMBIOS EN EL SERVIDOR
+  // 🔥 GUARDAR LOS CAMBIOS Y LA DIRECCIÓN CORRECTAMENTE EN EL SERVIDOR
   Future<void> _guardarCambios() async {
     setState(() => _guardando = true);
     try {
       final res = await http.post(
-        Uri.parse('$urlCentral/api/actualizar_perfil/${widget.idRepartidor}'),
+        Uri.parse('$urlCentral/api/actualizar_contacto'),
         headers: {"Content-Type": "application/json"},
         body: json.encode({
           "id_usuario": widget.idRepartidor,
           "telefono": telefonoCtrl.text.trim(),
           "correo": correoCtrl.text.trim(),
           "direccion": direccionCtrl.text.trim(),
+          "nombre": _nombre,
         }),
       );
 
       if (res.statusCode == 200 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("✅ Datos actualizados correctamente"),
-              backgroundColor: Colors.green),
-        );
+        final respuesta = json.decode(utf8.decode(res.bodyBytes));
+        if (respuesta['status'] == 'ok') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text("✅ Datos y dirección actualizados correctamente"),
+                backgroundColor: Colors.green),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(respuesta['mensaje'] ?? "Error al actualizar"),
+                backgroundColor: Colors.red),
+          );
+        }
       }
     } catch (e) {
       debugPrint("Error guardando datos: $e");
@@ -141,7 +149,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
         : '$urlCentral$_fotoPerfil';
   }
 
-  // Confirmación para eliminar cuenta
   void _mostrarDialogoEliminar() {
     showDialog(
       context: context,
@@ -202,7 +209,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // === 1. ZONA BLINDADA REAL (Foto conectada a BD) ===
             Center(
               child: Column(
                 children: [
@@ -258,8 +264,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
               ),
             ),
             const Divider(height: 40),
-
-            // === 2. DATOS DE CONTACTO ===
             const Text(
               "Datos de Contacto",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -294,8 +298,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
               maxLines: 2,
             ),
             const Divider(height: 40),
-
-            // === 3. SECCIÓN DE VEHÍCULO Y EVOLUCIÓN ===
             const Text(
               "Mi Vehículo",
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -317,8 +319,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
                 }
               },
             ),
-
-            // Detalles extra del vehículo (Color, Placas)
             if (tipoVehiculoSeleccionado != 'Bicicleta') ...[
               const SizedBox(height: 15),
               Row(
@@ -345,8 +345,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
                 ],
               ),
             ],
-
-            // === 4. EL UPGRADE (Sube de Bici a Moto/Carro) ===
             if (requierePapeles) ...[
               const SizedBox(height: 20),
               Container(
@@ -401,8 +399,6 @@ class _RepaPerfilState extends State<RepaPerfil> {
               ),
             ],
             const SizedBox(height: 30),
-
-            // === 5. BOTONES DE ACCIÓN ===
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0F766E),

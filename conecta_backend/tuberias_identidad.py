@@ -207,20 +207,40 @@ def obtener_perfil(id_usuario: int):
 @router.post("/api/actualizar_contacto/")
 def actualizar_contacto(datos: ActualizarContacto, id_usuario: int = None):
     target_id = id_usuario if id_usuario else datos.id_usuario
-    if not target_id or target_id <= 0:
+    
+    try:
+        target_id_limpio = int(target_id)
+    except (TypeError, ValueError):
+        return {"status": "error", "mensaje": "ID de usuario no válido."}
+
+    if target_id_limpio <= 0:
         return {"status": "error", "mensaje": "Error de identidad. Cierre sesión e intente de nuevo."}
         
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
     if datos.nombre and datos.nombre.strip() != "":
-        cursor.execute("UPDATE usuarios SET nombre = ?, telefono = ?, correo = ?, direccion = ? WHERE id_usuario = ?", (datos.nombre, datos.telefono, datos.correo, datos.direccion, target_id))
+        cursor.execute("""
+            UPDATE usuarios 
+            SET nombre = ?, telefono = ?, correo = ?, direccion = ? 
+            WHERE id_usuario = ?
+        """, (datos.nombre.strip(), datos.telefono.strip(), datos.correo.strip().lower(), datos.direccion.strip(), target_id_limpio))
     else:
-        cursor.execute("UPDATE usuarios SET telefono = ?, correo = ?, direccion = ? WHERE id_usuario = ?", (datos.telefono, datos.correo, datos.direccion, target_id))
+        cursor.execute("""
+            UPDATE usuarios 
+            SET telefono = ?, correo = ?, direccion = ? 
+            WHERE id_usuario = ?
+        """, (datos.telefono.strip(), datos.correo.strip().lower(), datos.direccion.strip(), target_id_limpio))
         
+    # 🔥 VALIDACIÓN DE ESCRITURA REAL EN DISCO
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "No se encontró el usuario a actualizar o el ID es incorrecto."}
+
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Datos actualizados correctamente en su perfil privado."}
+    return {"status": "ok", "mensaje": "Datos actualizados correctamente en su perfil privado de forma permanente."}
 
 @router.post("/subir_foto_cliente")
 @router.post("/subir_foto_cliente/")

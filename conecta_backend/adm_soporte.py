@@ -1,5 +1,5 @@
 # ========================================================
-# ARCHIVO: adm_soporte.py (VERSIÓN WHATSAPP + BORRADO NUCLEAR)
+# ARCHIVO: adm_soporte.py (VERSIÓN WHATSAPP + BORRADO NUCLEAR COMPLETA)
 # PROPÓSITO: Chat en vivo, Tickets de Soporte, Alertas y Publicidad
 # ========================================================
 from fastapi import APIRouter, UploadFile, File
@@ -90,7 +90,7 @@ def enviar_mensaje(req: MensajeChat):
     ticket = cursor.fetchone()
     
     if ticket:
-        # Reabrir ticket si mandan nuevo mensaje
+        # Reabrir ticket si mandan nuevo mensaje de forma permanente
         cursor.execute("""
             UPDATE soporte SET mensaje = ?, fecha = CURRENT_TIMESTAMP, estado = 'abierto' WHERE id_soporte = ?
         """, (req.mensaje, ticket[0]))
@@ -102,7 +102,7 @@ def enviar_mensaje(req: MensajeChat):
     
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Mensaje enviado y caso actualizado"}
+    return {"status": "ok", "mensaje": "Mensaje enviado y caso actualizado de forma permanente"}
 
 @router.post("/enviar_soporte/")
 @router.post("/api/enviar_soporte")
@@ -122,7 +122,7 @@ def enviar_soporte(req: TicketSoporte):
     
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Ticket abierto exitosamente."}
+    return {"status": "ok", "mensaje": "Ticket abierto exitosamente en disco."}
 
 # --- 1. REEMPLAZA LA FUNCIÓN DE HISTORIAL ACTUAL POR ESTA ---
 @router.get("/api/chat/historial/{id_pedido}/{canal}")
@@ -148,8 +148,14 @@ def borrar_un_mensaje(id_mensaje: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM mensajes_chat WHERE id_mensaje = ?", (id_mensaje,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Mensaje no encontrado."}
+
     conexion.commit(); conexion.close()
-    return {"status": "ok"}
+    return {"status": "ok", "mensaje": "Mensaje borrado permanentemente"}
 
 @router.delete("/api/chat/borrar_todo/{id_pedido}")
 def borrar_todo_chat(id_pedido: int):
@@ -157,7 +163,7 @@ def borrar_todo_chat(id_pedido: int):
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (id_pedido,))
     conexion.commit(); conexion.close()
-    return {"status": "ok"}
+    return {"status": "ok", "mensaje": "Chat borrado permanentemente"}
 
 @router.get("/api/cliente/notificaciones_chat")
 def notificaciones_cliente():
@@ -226,9 +232,15 @@ def resolver_ticket(id_ticket: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE soporte SET estado = 'resuelto' WHERE id_soporte = ?", (id_ticket,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Ticket no encontrado."}
+
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Queja marcada como resuelta exitosamente."}
+    return {"status": "ok", "mensaje": "Queja marcada como resuelta permanentemente."}
 
 # 🔥 ELIMINADOR NUCLEAR (BOTÓN ROJO)
 @router.post("/api/admin/eliminar_ticket/{id_ticket}")
@@ -246,7 +258,7 @@ def eliminar_ticket_admin(id_ticket: int):
         cursor.execute("DELETE FROM soporte WHERE id_soporte = ?", (id_ticket,))
         conexion.commit()
         conexion.close()
-        return {"status": "ok", "mensaje": "Chat y ticket eliminados por completo."}
+        return {"status": "ok", "mensaje": "Chat y ticket eliminados permanentemente por completo."}
     else:
         conexion.close()
         return {"status": "error", "mensaje": "Ticket no encontrado"}
@@ -330,7 +342,7 @@ def borrar_ticket_cliente(id_pedido: int):
     cursor.execute("DELETE FROM soporte WHERE id_pedido = ? AND estado = 'resuelto'", (id_pedido,))
     cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (id_pedido,))
     conexion.commit(); conexion.close()
-    return {"status": "ok", "mensaje": "Caso eliminado exitosamente"}
+    return {"status": "ok", "mensaje": "Caso eliminado permanentemente exitosamente"}
 
 @router.get("/api/cliente/validar_rastreo/{codigo}")
 def validar_rastreo_cliente(codigo: str):
@@ -369,7 +381,8 @@ async def subir_evidencia(archivo: UploadFile = File(...)):
         return {"status": "ok", "ruta": f"/static/chat_media/{nuevo_nombre}"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
-    # --- 1. OBTENER TICKETS DE SOPORTE PARA EL ADMIN (Conteo y Listado) ---
+
+# --- 1. OBTENER TICKETS DE SOPORTE PARA EL ADMIN (Conteo y Listado) ---
 @router.get("/api/admin/tickets_soporte")
 def admin_obtener_tickets():
     conexion = sqlite3.connect(DB_PATH)
@@ -399,9 +412,15 @@ def admin_resolver_ticket(id_ticket: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE soporte_tickets SET estado = 'resuelto' WHERE id_ticket = ?", (id_ticket,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Ticket no encontrado."}
+
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Ticket marcado como solucionado"}
+    return {"status": "ok", "mensaje": "Ticket marcado como solucionado permanentemente"}
 
 # --- 3. DESTRUIR CHAT Y TICKET POR COMPLETO (Botón Rojo Nuclear) ---
 @router.post("/api/admin/eliminar_ticket/{id_ticket}")
@@ -421,17 +440,47 @@ def admin_eliminar_ticket(id_ticket: int):
         cursor.execute("DELETE FROM soporte_tickets WHERE id_ticket = ?", (id_ticket,))
         conexion.commit()
         conexion.close()
-        return {"status": "ok", "mensaje": "Chat y ticket eliminados por completo."}
+        return {"status": "ok", "mensaje": "Chat y ticket eliminados permanentemente por completo."}
     
     conexion.close()
     return {"status": "error", "mensaje": "Ticket no encontrado"}
-@router.get("/api/cliente/validar_pedido/{id_pedido}")
-def validar_pedido_existente(id_pedido: int):
+
+@router.get("/api/admin/clientes_activos")
+def clientes_activos_admin():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("SELECT id_pedido FROM pedidos WHERE id_pedido = ?", (id_pedido,))
-    fila = cursor.fetchone()
+    
+    # 1. Obtenemos a todos los clientes registrados en la red
+    cursor.execute("""
+        SELECT id_usuario, COALESCE(nombre, 'Cliente'), 
+               COALESCE(telefono, 'Sin teléfono'), COALESCE(correo, 'Sin correo'),
+               COALESCE(foto_perfil, 'Sin foto'), COALESCE(estado, 'activo')
+        FROM usuarios
+        WHERE LOWER(rol) = 'cliente'
+    """)
+    filas = cursor.fetchall()
+    
+    # 2. Consultamos quiénes tienen un pedido activo en este momento
+    cursor.execute("""
+        SELECT DISTINCT id_cliente FROM pedidos 
+        WHERE estado NOT IN ('entregado', 'cancelado', 'archivado')
+    """)
+    con_pedido_activo = {row[0] for row in cursor.fetchall()}
     conexion.close()
-    if fila:
-        return {"valido": True}
-    return {"valido": False}
+    
+    resultado = []
+    for r in filas:
+        id_usu = r[0]
+        # Está activo si tiene un pedido en curso o su cuenta está activa
+        es_activo = id_usu in con_pedido_activo or r[5] == 'activo'
+        
+        resultado.append({
+            "id_usuario": id_usu,
+            "nombre": r[1],
+            "telefono": r[2],
+            "correo": r[3],
+            "foto": r[4],
+            "activo_buscando": es_activo
+        })
+        
+    return resultado

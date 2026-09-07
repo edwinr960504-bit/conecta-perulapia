@@ -127,20 +127,32 @@ def juzgar_comercio(d: DecisionJuez):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE comercios SET estado = ? WHERE id_comercio = ?", (d.nuevo_estado, d.id_objetivo))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Comercio no encontrado."}
+
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Comercio ID {d.id_objetivo} cambiado a estado: {d.nuevo_estado}")
-    return {"mensaje": "Estado actualizado"}
+    registrar_auditoria(f"Comercio ID {d.id_objetivo} cambiado permanentemente a estado: {d.nuevo_estado}")
+    return {"status": "ok", "mensaje": "Estado actualizado de forma permanente"}
 
 @router.post("/api/admin/juez_repartidor")
 def juzgar_repartidor(d: DecisionJuez):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE usuarios SET estado = ? WHERE id_usuario = ?", (d.nuevo_estado, d.id_objetivo))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Usuario repartidor no encontrado."}
+
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Usuario ID {d.id_objetivo} cambiado a estado: {d.nuevo_estado}")
-    return {"mensaje": "Estado actualizado"}
+    registrar_auditoria(f"Usuario ID {d.id_objetivo} cambiado permanentemente a estado: {d.nuevo_estado}")
+    return {"status": "ok", "mensaje": "Estado actualizado de forma permanente"}
 
 # ========================================================
 # 4. INCINERADOR DE PEDIDOS
@@ -150,10 +162,16 @@ def forzar_cancelacion(req: CancelarReq):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM pedidos WHERE id_pedido = ?", (req.id_pedido,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Pedido no encontrado para eliminar."}
+
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Pedido fantasma #{req.id_pedido} eliminado de raíz.")
-    return {"status": "ok", "mensaje": "Pedido eliminado de raíz."}
+    registrar_auditoria(f"Pedido fantasma #{req.id_pedido} eliminado de raíz permanentemente.")
+    return {"status": "ok", "mensaje": "Pedido eliminado de raíz de forma permanente."}
 
 # ========================================================
 # 5. DIRECTORIO MAESTRO Y CONTROL ABSOLUTO
@@ -222,9 +240,15 @@ def eliminar_usuario(req: BorrarReq):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM usuarios WHERE id_usuario = ?", (req.id_objetivo,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Usuario no encontrado."}
+
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Usuario ID {req.id_objetivo} eliminado permanentemente.")
+    registrar_auditoria(f"Usuario ID {req.id_objetivo} eliminado permanentemente de disco.")
     return {"status": "ok"}
 
 @router.post("/api/admin/eliminar_comercio")
@@ -232,9 +256,15 @@ def eliminar_comercio(req: BorrarReq):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM comercios WHERE id_comercio = ?", (req.id_objetivo,))
+    
+    if cursor.rowcount == 0:
+        conexion.rollback()
+        conexion.close()
+        return {"status": "error", "mensaje": "Comercio no encontrado."}
+
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Comercio ID {req.id_objetivo} eliminado permanentemente.")
+    registrar_auditoria(f"Comercio ID {req.id_objetivo} eliminado permanentemente de disco.")
     return {"status": "ok"}
 
 # ========================================================
@@ -248,8 +278,8 @@ def estado_masivo_comercios(datos: AccionMasiva):
     cursor.execute("UPDATE comercios SET estado = ?", (nuevo_estado,))
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"ADMIN DICTATORIAL: Todos los comercios cambiados masivamente a estado: {nuevo_estado}")
-    return {"status": "ok", "mensaje": f"Todos los negocios ahora están {nuevo_estado}s."}
+    registrar_auditoria(f"ADMIN DICTATORIAL: Todos los comercios cambiados masivamente y de forma permanente a estado: {nuevo_estado}")
+    return {"status": "ok", "mensaje": f"Todos los negocios ahora están {nuevo_estado}s de forma permanente."}
 
 # ========================================================
 # 7. NUEVAS TUBERÍAS DE PODER TOTAL (AUDITORÍA Y DIFUSIÓN)
@@ -278,5 +308,5 @@ def publicar_anuncio(anuncio: AnuncioReq):
     cursor.execute("INSERT INTO anuncios_globales (mensaje, imagen_url) VALUES (?, ?)", (anuncio.mensaje, anuncio.imagen_url))
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Anuncio global actualizado: {anuncio.mensaje}")
-    return {"status": "ok", "mensaje": "Anuncio publicado en toda la red."}
+    registrar_auditoria(f"Anuncio global actualizado permanentemente: {anuncio.mensaje}")
+    return {"status": "ok", "mensaje": "Anuncio publicado en toda la red de forma permanente."}

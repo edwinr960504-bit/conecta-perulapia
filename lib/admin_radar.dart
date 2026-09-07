@@ -1,3 +1,6 @@
+// ========================================================
+// ARCHIVO: admin_radar.dart (ACTUALIZADO CON CLIENTES ACTIVOS Y DIRECTORIOS)
+// ========================================================
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -5,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'red.dart';
+import 'admin_radar_directorios.dart'; // 🔥 Importación del módulo de la barra inferior
 
 class AdminRadar extends StatefulWidget {
   const AdminRadar({super.key});
@@ -21,6 +25,11 @@ class _AdminRadarState extends State<AdminRadar>
   List<dynamic> _pedidosActivos = [];
   List<dynamic> _comerciosActivos = [];
   List<dynamic> _flotaActiva = []; // Motoristas conectados
+  List<dynamic> _clientesActivos = []; // 🔥 NUEVA LISTA DE CLIENTES ACTIVOS
+
+  // 🔥 NUEVAS LISTAS PARA EL MÓDULO INFERIOR
+  List<dynamic> _directorioFlota = [];
+  List<dynamic> _directorioComercios = [];
 
   bool _cargandoRadar = true;
   Timer? _timerGlobal;
@@ -184,15 +193,21 @@ class _AdminRadarState extends State<AdminRadar>
 
   Future<void> _cargarCentroDeControl() async {
     try {
-      // 1. Cargamos todos los pedidos
       final resPedidos =
           await http.get(Uri.parse('$urlCentral/api/admin/radar_despacho'));
-      // 2. Cargamos comercios activos
       final resComercios =
           await http.get(Uri.parse('$urlCentral/api/comercios_activos'));
-      // 3. Cargamos la flota de motoristas (Si no existe este endpoint en tu Python aún, devolverá vacío y no pasa nada)
-      final resFlota =
-          await http.get(Uri.parse('$urlCentral/api/admin/flota_activa'));
+      final resFlota = await http
+          .get(Uri.parse('$urlCentral/api/admin/flota_global_activa'));
+      // 🔥 CARGAMOS CLIENTES ACTIVOS DESDE EL ENDPOINT NUEVO
+      final resClientes =
+          await http.get(Uri.parse('$urlCentral/api/admin/clientes_activos'));
+
+      // 🔥 Peticiones para los directorios completos en la barra inferior
+      final resDirectorioFlota =
+          await http.get(Uri.parse('$urlCentral/api/admin/repartidores_admin'));
+      final resDirectorioComercios =
+          await http.get(Uri.parse('$urlCentral/api/admin/comercios_admin'));
 
       if (resPedidos.statusCode == 200 && mounted) {
         setState(() {
@@ -204,6 +219,18 @@ class _AdminRadarState extends State<AdminRadar>
           if (resFlota.statusCode == 200) {
             _flotaActiva = json.decode(utf8.decode(resFlota.bodyBytes));
           }
+          if (resClientes.statusCode == 200) {
+            _clientesActivos = json.decode(utf8.decode(resClientes.bodyBytes));
+          }
+          if (resDirectorioFlota.statusCode == 200) {
+            _directorioFlota =
+                json.decode(utf8.decode(resDirectorioFlota.bodyBytes));
+          }
+          if (resDirectorioComercios.statusCode == 200) {
+            _directorioComercios =
+                json.decode(utf8.decode(resDirectorioComercios.bodyBytes));
+          }
+
           _cargandoRadar = false;
         });
       }
@@ -227,7 +254,137 @@ class _AdminRadarState extends State<AdminRadar>
     }
   }
 
-  // Generador falso de coordenadas de comercios por si la BD no los trae (igual al que usaste antes)
+  // 🔥 Despliega la lista de clientes activos al presionar el botón del dashboard
+  void _mostrarListaClientes(List<dynamic> clientes) {
+    // Filtramos activos e inactivos
+    final activos =
+        clientes.where((c) => c['activo_buscando'] == true).toList();
+    final inactivos =
+        clientes.where((c) => c['activo_buscando'] == false).toList();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.70,
+          padding: const EdgeInsets.only(top: 15),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                  width: 50,
+                  height: 5,
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(10))),
+              const SizedBox(height: 15),
+              const Text("Control de Consumidores",
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1E3A8A))),
+              const SizedBox(height: 5),
+              // Resumen de cantidades
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _BadgeConteo(
+                      label: "Activos",
+                      cantidad: activos.length,
+                      color: Colors.green),
+                  const SizedBox(width: 15),
+                  _BadgeConteo(
+                      label: "Inactivos",
+                      cantidad: inactivos.length,
+                      color: Colors.grey),
+                ],
+              ),
+              const Divider(height: 25),
+              Expanded(
+                child: clientes.isEmpty
+                    ? const Center(child: Text("No hay clientes registrados"))
+                    : ListView.builder(
+                        itemCount: clientes.length,
+                        padding: const EdgeInsets.all(12),
+                        itemBuilder: (ctx, i) {
+                          final c = clientes[i];
+                          final foto = c['foto']?.toString() ?? '';
+                          final tieneFoto =
+                              foto.isNotEmpty && foto != 'Sin foto';
+                          final bool estaActivo = c['activo_buscando'] ?? false;
+
+                          return Card(
+                            elevation: 2,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                            child: ListTile(
+                              leading: Stack(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: Colors.indigo.shade100,
+                                    backgroundImage: tieneFoto
+                                        ? NetworkImage("$urlCentral$foto")
+                                        : null,
+                                    child: !tieneFoto
+                                        ? const Icon(Icons.person,
+                                            color: Color(0xFF1E3A8A))
+                                        : null,
+                                  ),
+                                  // Indicador de punto verde o gris
+                                  Positioned(
+                                    right: 0,
+                                    bottom: 0,
+                                    child: Container(
+                                      width: 14,
+                                      height: 14,
+                                      decoration: BoxDecoration(
+                                        color: estaActivo
+                                            ? Colors.green
+                                            : Colors.grey,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                            color: Colors.white, width: 2),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              title: Text(c['nombre'] ?? 'Cliente',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)),
+                              subtitle: Text(
+                                  "Tel: ${c['telefono']}\nCorreo: ${c['correo']}"),
+                              trailing: Chip(
+                                label: Text(
+                                  estaActivo ? "Viendo app" : "Inactivo",
+                                  style: TextStyle(
+                                      color: estaActivo
+                                          ? Colors.green.shade800
+                                          : Colors.grey.shade700,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                backgroundColor: estaActivo
+                                    ? Colors.green.shade50
+                                    : Colors.grey.shade100,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              )
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   // 🔥 Despliega la lista de pedidos según el filtro seleccionado
   void _mostrarListaPedidos(
@@ -281,7 +438,6 @@ class _AdminRadarState extends State<AdminRadar>
                             child: ListTile(
                               onTap: () {
                                 Navigator.pop(ctx); // Cierra la lista
-                                // Abre el MODO DIOS
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -333,42 +489,145 @@ class _AdminRadarState extends State<AdminRadar>
     final enCocina = _pedidosActivos
         .where((p) =>
             p['estado'] == 'aceptado' ||
-            p['estado'] == 'preparando' ||
+            p['estado'] ==
+                'preparacion' || // 🔥 Corrección: Cambiado de 'preparando' a 'preparacion'
             p['estado'] == 'listo_recoleccion')
         .toList();
     final enRuta = _pedidosActivos
         .where((p) => p['estado'] == 'asignado' || p['estado'] == 'en_camino')
         .toList();
 
-    // Armamos los marcadores del mapa
-    // Armamos los marcadores del mapa
     List<Marker> marcadoresMapa = [];
 
-    // 🏪 COMERCIOS (Ubicación real y Tappable)
+    // 🛵 FLOTA DE MOTOS (Ubicación real y Tappable)
+    for (var moto in _flotaActiva) {
+      double lat = double.tryParse(moto['latitud']?.toString() ?? '0') ?? 0;
+      double lon = double.tryParse(moto['longitud']?.toString() ?? '0') ?? 0;
+
+      if (lat != 0 && lon != 0) {
+        marcadoresMapa.add(Marker(
+          point: LatLng(lat, lon),
+          width: 50,
+          height: 50,
+          child: GestureDetector(
+            onTap: () => _mostrarInfoMoto(moto),
+            child: FadeTransition(
+              opacity: _blinkController,
+              child: Container(
+                decoration: BoxDecoration(
+                    color: Colors.blue.shade700,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black45, blurRadius: 4)
+                    ]),
+                child:
+                    const Icon(Icons.motorcycle, color: Colors.white, size: 24),
+              ),
+            ),
+          ),
+        ));
+      }
+    }
+
+// 🏪 COMERCIOS (Animación Inteligente corregida)
     for (var comercio in _comerciosActivos) {
       double lat = double.tryParse(comercio['latitud']?.toString() ?? '0') ?? 0;
       double lon =
           double.tryParse(comercio['longitud']?.toString() ?? '0') ?? 0;
 
       if (lat != 0 && lon != 0) {
+        // Validamos el estado real cruzando el ID con el directorio completo
+        bool estaAbierto = false;
+        try {
+          final infoDir = _directorioComercios.firstWhere(
+              (c) =>
+                  c['id_comercio'] == comercio['id_comercio'] ||
+                  c['id'] == comercio['id_comercio'],
+              orElse: () => null);
+          if (infoDir != null) {
+            estaAbierto =
+                infoDir['activo_app'] == true || infoDir['estado'] == 'activo';
+          } else {
+            estaAbierto = comercio['estado'] == 'activo';
+          }
+        } catch (_) {
+          estaAbierto = comercio['estado'] == 'activo';
+        }
+
+        Widget pinComercio = Container(
+          decoration: BoxDecoration(
+              color: estaAbierto
+                  ? Colors.green.shade700
+                  : Colors
+                      .grey.shade600, // Verde brillante si abre, Gris si cierra
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black45, blurRadius: 4)
+              ]),
+          child: const Icon(Icons.storefront, color: Colors.white, size: 22),
+        );
+
+        // 🔥 Forzamos la animación de parpadeo estrictamente para los abiertos
+        if (estaAbierto) {
+          pinComercio =
+              FadeTransition(opacity: _blinkController, child: pinComercio);
+        }
+
         marcadoresMapa.add(Marker(
           point: LatLng(lat, lon),
           width: 45,
           height: 45,
           child: GestureDetector(
-            onTap: () =>
-                _mostrarInfoComercio(comercio), // 🔥 Abre la info del local
-            child: Container(
-              decoration: BoxDecoration(
-                  color: Colors.green.shade700,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black45, blurRadius: 4)
-                  ]),
-              child:
-                  const Icon(Icons.storefront, color: Colors.white, size: 22),
-            ),
+            onTap: () => _mostrarInfoComercio(comercio),
+            child: pinComercio,
+          ),
+        ));
+      }
+    }
+
+    // 🛵 FLOTA DE MOTOS (Animación Inteligente)
+    for (var moto in _flotaActiva) {
+      double lat = double.tryParse(moto['latitud']?.toString() ?? '0') ?? 0;
+      double lon = double.tryParse(moto['longitud']?.toString() ?? '0') ?? 0;
+
+      if (lat != 0 && lon != 0) {
+        // Determinamos si anda en chinga (en ruta) cruzando con el directorio
+        bool enRuta = false;
+        try {
+          final infoDir = _directorioFlota.firstWhere(
+              (m) => m['id_usuario'] == moto['id_repartidor'],
+              orElse: () => null);
+          if (infoDir != null) enRuta = infoDir['en_ruta'] == true;
+        } catch (_) {}
+
+        Widget pinMoto = Container(
+          decoration: BoxDecoration(
+              color: enRuta
+                  ? Colors.blue.shade700
+                  : Colors.indigo
+                      .shade300, // Azul fuerte si viaja, celeste apagado si espera
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(color: Colors.black45, blurRadius: 4)
+              ]),
+          child: const Icon(Icons.motorcycle, color: Colors.white, size: 24),
+        );
+
+        // Si anda en pedido, parpadea. Si está esperando viaje en la calle, se queda quieto.
+        if (enRuta) {
+          pinMoto = FadeTransition(opacity: _blinkController, child: pinMoto);
+        }
+
+        marcadoresMapa.add(Marker(
+          point: LatLng(lat, lon),
+          width: 50,
+          height: 50,
+          child: GestureDetector(
+            onTap: () => _mostrarInfoMoto(moto),
+            child: pinMoto,
           ),
         ));
       }
@@ -385,8 +644,7 @@ class _AdminRadarState extends State<AdminRadar>
           width: 50,
           height: 50,
           child: GestureDetector(
-            onTap: () =>
-                _mostrarInfoMoto(moto), // 🔥 Abre la info del motorista
+            onTap: () => _mostrarInfoMoto(moto),
             child: FadeTransition(
               opacity: _blinkController,
               child: Container(
@@ -450,6 +708,14 @@ class _AdminRadarState extends State<AdminRadar>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
+                    // 🔥 NUEVO BOTÓN DE CLIENTES ACTIVOS AL INICIO
+                    _DashboardBoton(
+                      titulo: "Clientes",
+                      cantidad: _clientesActivos.length,
+                      color: const Color(0xFF1E3A8A),
+                      icono: Icons.group,
+                      onTap: () => _mostrarListaClientes(_clientesActivos),
+                    ),
                     _DashboardBoton(
                       titulo: "Pendientes",
                       cantidad: pendientes.length,
@@ -480,6 +746,12 @@ class _AdminRadarState extends State<AdminRadar>
                 ),
               ),
             ),
+          ),
+
+          // 🔥 INVOCACIÓN AL MÓDULO INFERIOR (FLOTA Y LOCALES)
+          AdminRadarDirectorios(
+            flota: _directorioFlota,
+            comercios: _directorioComercios,
           ),
 
           // 3. BOTÓN PARA CENTRAR MAPA
@@ -829,6 +1101,40 @@ class _AdminMapaMonitorState extends State<AdminMapaMonitor> {
               ),
             ),
           )
+        ],
+      ),
+    );
+  }
+}
+
+class _BadgeConteo extends StatelessWidget {
+  final String label;
+  final int cantidad;
+  final Color color;
+
+  const _BadgeConteo(
+      {required this.label, required this.cantidad, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text("$cantidad $label",
+              style: TextStyle(
+                  color: color, fontWeight: FontWeight.bold, fontSize: 13)),
         ],
       ),
     );

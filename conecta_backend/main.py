@@ -104,7 +104,7 @@ def inicializar_base_maestra():
     conexion.commit()
     conexion.close()
 
-# Ejecutar al arrancar el servidor principal
+# Ejecutar al arrancar el servidor principal con persistencia absoluta
 inicializar_base_maestra()
 
 # --- CREACIÓN DE LA APLICACIÓN PRINCIPAL ---
@@ -147,6 +147,49 @@ app.include_router(adm_soporte.router)
 # ========================================================
 # ENDPOINTS DE CONTROL Y MONITOREO
 # ========================================================
+
+# ========================================================
+# ENDPOINT INYECTADO DIRECTAMENTE (CLIENTES ACTIVOS)
+# ========================================================
+@app.get("/api/admin/clientes_activos")
+def clientes_activos_admin():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    
+    # 1. Obtenemos a todos los clientes registrados
+    cursor.execute("""
+        SELECT id_usuario, COALESCE(nombre, 'Cliente'), 
+               COALESCE(telefono, 'Sin teléfono'), COALESCE(correo, 'Sin correo'),
+               COALESCE(foto_perfil, 'Sin foto'), COALESCE(estado, 'activo')
+        FROM usuarios
+        WHERE LOWER(rol) = 'cliente'
+    """)
+    filas = cursor.fetchall()
+    
+    # 2. Consultamos quiénes tienen un pedido activo
+    cursor.execute("""
+        SELECT DISTINCT id_cliente FROM pedidos 
+        WHERE estado NOT IN ('entregado', 'cancelado', 'archivado')
+    """)
+    con_pedido_activo = {row[0] for row in cursor.fetchall()}
+    conexion.close()
+    
+    resultado = []
+    for r in filas:
+        id_usu = r[0]
+        es_activo = id_usu in con_pedido_activo or r[5] == 'activo'
+        
+        resultado.append({
+            "id_usuario": id_usu,
+            "nombre": r[1],
+            "telefono": r[2],
+            "correo": r[3],
+            "foto": r[4],
+            "activo_buscando": es_activo
+        })
+        
+    return resultado
+
 @app.get("/")
 def raiz():
     return {
@@ -167,3 +210,127 @@ def raiz():
 @app.get("/api/ping")
 def ping():
     return {"ping": "pong", "conexion": "estable"}
+# ========================================================
+# ENDPOINTS INYECTADOS DIRECTAMENTE (TROPAS Y LOCALES)
+# ========================================================
+@app.get("/api/admin/repartidores_admin")
+def repartidores_admin_lista():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    # Traemos a todos los motoristas registrados
+    cursor.execute("""
+        SELECT id_usuario, COALESCE(nombre, 'Motorista'), 
+               COALESCE(telefono, 'Sin teléfono'), COALESCE(foto_perfil, 'Sin foto'),
+               COALESCE(estado, 'inactivo')
+        FROM usuarios
+        WHERE LOWER(rol) IN ('repartidor', 'motorista')
+    """)
+    filas = cursor.fetchall()
+    
+    # Revisamos si están ocupados en un pedido actualmente
+    cursor.execute("SELECT DISTINCT id_repartidor FROM pedidos WHERE estado IN ('asignado', 'en_camino')")
+    ocupados = {row[0] for row in cursor.fetchall()}
+    conexion.close()
+    
+    resultado = []
+    for r in filas:
+        id_rep = r[0]
+        es_activo = r[4] == 'activo'
+        en_ruta = id_rep in ocupados
+        
+        resultado.append({
+            "id_usuario": id_rep,
+            "nombre": r[1],
+            "telefono": r[2],
+            "foto": r[3],
+            "activo_app": es_activo,
+            "en_ruta": en_ruta
+        })
+    return resultado
+from pydantic import BaseModel
+import sqlite3
+
+# --- AUTO-PARCHE DE BASE DE DATOS ---
+def preparar_gps_flota():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    # Añadimos las columnas de GPS a los usuarios si no existen
+    try: cursor.execute("ALTER TABLE usuarios ADD COLUMN latitud_actual REAL DEFAULT 0.0")
+    except: pass
+    try: cursor.execute("ALTER TABLE usuarios ADD COLUMN longitud_actual REAL DEFAULT 0.0")
+    except: pass
+    conexion.commit()
+    conexion.close()
+
+preparar_gps_flota()
+
+# --- MODELO RECEPTOR ---
+class GpsMotoristaVivo(BaseModel):
+    id_usuario: int
+    latitud: float
+    longitud: float
+
+# --- ENDPOINT 1: RECEPTOR DE LA APP DEL MOTORISTA ---
+@app.post("/api/motorista/actualizar_gps_vivo")
+def actualizar_gps_vivo(datos: GpsMotoristaVivo):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    cursor.execute("""
+        UPDATE usuarios 
+        SET latitud_actual = ?, longitud_actual = ? 
+        WHERE id_usuario = ?
+    """, (datos.latitud, datos.longitud, datos.id_usuario))
+    conexion.commit()
+    conexion.close()
+    return {"status": "ok"}
+
+# --- ENDPOINT 2: EMISOR PARA EL RADAR (MODO DIOS) ---
+@app.get("/api/admin/flota_global_activa")
+def flota_global_activa():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    # Traemos a TODOS los motoristas que estén "activos", tengan pedido o no
+    cursor.execute("""
+        SELECT id_usuario, latitud_actual, longitud_actual, 
+               nombre, COALESCE(foto_perfil, 'Sin foto'), COALESCE(telefono, 'Sin teléfono')
+        FROM usuarios
+        WHERE LOWER(rol) IN ('repartidor', 'motorista') 
+          AND estado = 'activo'
+          AND latitud_actual != 0.0
+    """)
+    flota = cursor.fetchall()
+    conexion.close()
+    
+    return [{
+        "id_repartidor": r[0], 
+        "latitud": r[1], 
+        "longitud": r[2], 
+        "nombre": r[3],
+        "foto": r[4],
+        "telefono": r[5]
+    } for r in flota]
+
+@app.get("/api/admin/comercios_admin")
+def comercios_admin_lista():
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    # Traemos a todos los negocios
+    cursor.execute("""
+        SELECT id_comercio, COALESCE(nombre_local, 'Comercio'), 
+               COALESCE(telefono, 'Sin teléfono'), COALESCE(logo, 'Sin logo'),
+               COALESCE(estado, 'cerrado')
+        FROM comercios
+    """)
+    filas = cursor.fetchall()
+    conexion.close()
+    
+    resultado = []
+    for r in filas:
+        resultado.append({
+            "id_comercio": r[0],
+            "nombre": r[1],
+            "telefono": r[2],
+            "foto": r[3],
+            "activo_app": r[4] == 'activo'
+        })
+    return resultado

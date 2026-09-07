@@ -61,6 +61,13 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                 double.tryParse(data['latitud']?.toString() ?? '');
             _longitudSeleccionada =
                 double.tryParse(data['longitud']?.toString() ?? '');
+
+            // 🔥 Aseguramos que el nombre del controlador local refleje exactamente lo que viene de la base de datos
+            if (data['nombre_local'] != null &&
+                data['nombre_local'].toString().isNotEmpty) {
+              _nombreCtrl.text = data['nombre_local'];
+            }
+
             if (data['logo'] != null &&
                 data['logo'].toString().isNotEmpty &&
                 data['logo'] != 'Sin logo') {
@@ -160,7 +167,7 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context, true);
+        Navigator.pop(context, _nombreCtrl.text.trim());
       }
     } catch (e) {
       debugPrint("🚨 Error al guardar: $e");
@@ -272,8 +279,6 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                         color: Color(0xFF1E3A8A), size: 28),
                     tooltip: "Seleccionar ubicación exacta en el mapa",
                     onPressed: () async {
-                      // 🔥 AQUÍ ESTÁ LA CLAVE: Le pasamos las coordenadas guardadas actuales
-                      // para que el mapa abra exactamente donde el comerciante lo dejó la última vez.
                       final resultadoUbicacion = await Navigator.push(
                         context,
                         MaterialPageRoute(
