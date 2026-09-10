@@ -1,3 +1,4 @@
+// Archivo: chat_soporte.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -6,19 +7,21 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:url_launcher/url_launcher.dart'; // 🔥 NUEVO PARA LLAMADAS
+import 'package:url_launcher/url_launcher.dart';
 import 'red.dart';
 
 class ChatSoporte extends StatefulWidget {
   final int idPedido;
   final String remitente;
   final String canal;
+  final String codigoRastreo; // Opcional por si viene directo
 
   const ChatSoporte({
     super.key,
     required this.idPedido,
     required this.remitente,
     this.canal = "admin_cliente",
+    this.codigoRastreo = "",
   });
 
   @override
@@ -31,6 +34,7 @@ class _ChatSoporteState extends State<ChatSoporte> {
   List<dynamic> _mensajes = [];
   Timer? _latido;
   bool _cargando = true;
+  String _tituloDinamico = "Cargando chat...";
 
   final ImagePicker _picker = ImagePicker();
   final AudioRecorder _recorder = AudioRecorder();
@@ -43,6 +47,13 @@ class _ChatSoporteState extends State<ChatSoporte> {
   @override
   void initState() {
     super.initState();
+    // Si ya trae el código, lo usarmos de inmediato; si no, lo consultamos a la base de datos
+    if (widget.codigoRastreo.isNotEmpty) {
+      _tituloDinamico = "Soporte - ${widget.codigoRastreo}";
+    } else {
+      _consultarCodigoServidor();
+    }
+
     _cargarHistorial();
     _latido = Timer.periodic(
         const Duration(seconds: 3), (t) => _cargarHistorial(silencioso: true));
@@ -56,6 +67,30 @@ class _ChatSoporteState extends State<ChatSoporte> {
     _recorder.dispose();
     _audioPlayer.dispose();
     super.dispose();
+  }
+
+  // 🔥 CONSULTA AUTOMÁTICA AL SERVIDOR SI FALTA EL CÓDIGO
+  Future<void> _consultarCodigoServidor() async {
+    if (widget.idPedido < 0) {
+      if (mounted) setState(() => _tituloDinamico = "Soporte General");
+      return;
+    }
+    try {
+      final res = await http.get(Uri.parse(
+          '$urlCentral/api/chat/codigo_por_pedido/${widget.idPedido}'));
+      if (res.statusCode == 200 && mounted) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        final codigo = data['codigo_rastreo'] ?? "Pedido #${widget.idPedido}";
+        setState(() {
+          _tituloDinamico = "Soporte - $codigo";
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+            () => _tituloDinamico = "Soporte - Pedido #${widget.idPedido}");
+      }
+    }
   }
 
   Future<void> _cargarHistorial({bool silencioso = false}) async {
@@ -84,17 +119,15 @@ class _ChatSoporteState extends State<ChatSoporte> {
     });
   }
 
-  // 🔥 FUNCIÓN PARA LLAMADAS
   Future<void> _llamarSoporte() async {
-    final Uri url = Uri.parse('tel:+50377777777'); // Coloca tu número real aquí
+    final Uri url = Uri.parse('tel:+50377777777');
     if (!await launchUrl(url)) {
-      // ignore: use_build_context_synchronously
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text("No se pudo abrir el marcador de llamadas")));
     }
   }
 
-  // 🔥 BORRAR UN SOLO MENSAJE
   void _confirmarBorradoIndividual(int idMensaje) {
     showDialog(
       context: context,
@@ -120,7 +153,6 @@ class _ChatSoporteState extends State<ChatSoporte> {
     );
   }
 
-  // 🔥 BORRAR
   void _confirmarBorradoTotal() {
     showDialog(
       context: context,
@@ -169,7 +201,6 @@ class _ChatSoporteState extends State<ChatSoporte> {
       setState(() => _estaGrabando = false);
       if (path != null) await _subirArchivo(File(path), "🎤 Nota de voz");
     } else {
-      // 🔥 VALIDACIÓN DE PERMISO NATIVA DEL PAQUETE RECORD 🔥
       if (await _recorder.hasPermission()) {
         final dir = Directory.systemTemp;
         _audioPath =
@@ -197,8 +228,7 @@ class _ChatSoporteState extends State<ChatSoporte> {
           await _enviarMensajeBD(mensajeDescriptivo, jsonRes['ruta']);
         }
       }
-      // ignore: empty_catches
-    } catch (e) {}
+    } catch (_) {}
   }
 
   Future<void> _enviarMensajeBD(String mensaje, String evidencia) async {
@@ -216,8 +246,7 @@ class _ChatSoporteState extends State<ChatSoporte> {
       );
       _cargarHistorial();
       _bajarScroll();
-      // ignore: empty_catches
-    } catch (e) {}
+    } catch (_) {}
   }
 
   void _reproducirAudio(String rutaWeb) async {
@@ -230,10 +259,7 @@ class _ChatSoporteState extends State<ChatSoporte> {
     return Scaffold(
       backgroundColor: Colors.grey[200],
       appBar: AppBar(
-        title: Text(
-            widget.idPedido < 0
-                ? "Soporte General"
-                : "Chat #${widget.idPedido}",
+        title: Text(_tituloDinamico,
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,

@@ -198,12 +198,14 @@ def comercio_pedido_listo(req: AccionComercio):
 def radar_del_cliente(id_cliente: int):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
+    
+    # Agregamos p.id_comercio al final (índice 15) para saber de qué local sacar las fotos
     cursor.execute("""
         SELECT p.id_pedido, p.estado, p.pin_seguridad, p.latitud_repartidor, p.longitud_repartidor, p.total_pago,
                COALESCE(c.nombre_local, 'Comercio Local'), COALESCE(u_rep.nombre, ''), COALESCE(u_rep.telefono, ''),
                p.tiempo_preparacion, p.descripcion, p.id_repartidor, 
                (SELECT COUNT(*) FROM pedidos p2 WHERE p2.id_cliente = p.id_cliente AND DATE(p2.fecha) = DATE(p.fecha) AND p2.id_pedido <= p.id_pedido), 
-               p.fecha, p.codigo_rastreo
+               p.fecha, p.codigo_rastreo, p.id_comercio
         FROM pedidos p 
         LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
         LEFT JOIN usuarios u_rep ON p.id_repartidor = u_rep.id_usuario
@@ -211,15 +213,30 @@ def radar_del_cliente(id_cliente: int):
         ORDER BY p.id_pedido ASC
     """, (id_cliente,))
     filas = cursor.fetchall()
-    conexion.close()
     
     resultado = []
     for r in filas:
+        id_pedido = r[0]
         est_db = r[1]
         id_rep = r[11] or 0
         lat_db, lon_db = r[3], r[4]
         nombre_negocio = r[6]
+        id_comercio = r[15] or 0
         
+        # 🔥 TRUCO: Jalamos hasta 3 fotos del menú del local para darle vida a la tarjeta
+        # Envuelto en try/except para que jamás vuelva a botar los pedidos si falla algo.
+        try:
+            cursor.execute("""
+                SELECT foto_platillo 
+                FROM productos 
+                WHERE id_comercio = ? AND foto_platillo != 'Sin foto' AND foto_platillo != '' 
+                LIMIT 3
+            """, (id_comercio,))
+            fotos_local = cursor.fetchall()
+            productos_con_foto = [{"foto": f[0]} for f in fotos_local if f[0]]
+        except Exception:
+            productos_con_foto = []
+
         if est_db == 'pendiente': texto_pantalla = f"⏳ Esperando confirmación de {nombre_negocio}..."
         elif est_db == 'preparacion': texto_pantalla = f"👨‍🍳 Cocinando tu pedido en {nombre_negocio} ({r[9]})"
         elif est_db == 'listo_recoleccion': texto_pantalla = f"🛍️ Pedido listo en {nombre_negocio}. Esperando motorista"
@@ -227,15 +244,18 @@ def radar_del_cliente(id_cliente: int):
         else: texto_pantalla = f"🛵 Motorista ({r[7]}) asignado, yendo a {nombre_negocio}"
 
         resultado.append({
-            "id_pedido": r[0], "numero_orden": r[12] or r[0],
+            "id_pedido": id_pedido, "numero_orden": r[12] or id_pedido,
             "codigo_rastreo": r[14] or f"CP-0000",
             "estado": texto_pantalla, "estado_codigo": est_db,
             "pin_seguridad": r[2], "total": r[5], "negocio": nombre_negocio,
             "tiempo_preparacion": r[9], "descripcion": r[10],
             "repartidor": r[7] if id_rep > 0 else "", "telefono_rep": r[8], "id_repartidor": id_rep,
             "lat": lat_db if lat_db != 0.0 else None, "lon": lon_db if lon_db != 0.0 else None,
-            "en_camino": (est_db == 'en_camino'), "fecha": r[13]
+            "en_camino": (est_db == 'en_camino'), "fecha": r[13],
+            "productos": productos_con_foto  # 🔥 Se envían las fotos a la App
         })
+        
+    conexion.close()
     return resultado
 
 @router.get("/api/historial_cliente/{id_cliente}")

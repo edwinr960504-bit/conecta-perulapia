@@ -1,11 +1,11 @@
+// Archivo: vista_editar_perfil.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'red.dart';
-import 'vista_direcciones.dart';
-
+import 'selector_mapa.dart'; // Selector de mapa interactivo
 
 class VistaEditarPerfil extends StatefulWidget {
   final int idUsuario;
@@ -22,12 +22,14 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
   final TextEditingController _correoCtrl = TextEditingController();
   final TextEditingController _direccionCtrl = TextEditingController();
 
+  double? _latitudSeleccionada;
+  double? _longitudSeleccionada;
+
   bool _cargando = true;
   bool _guardando = false;
 
   File? _imagenLocal;
-  String _fotoPerfilUrl =
-      ""; // 🔥 NUEVO: Memoria para la foto actual del servidor
+  String _fotoPerfilUrl = "";
   final ImagePicker _picker = ImagePicker();
 
   @override
@@ -48,8 +50,13 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
           _telefonoCtrl.text = datos['telefono'] ?? '';
           _correoCtrl.text = datos['correo'] ?? '';
           _direccionCtrl.text = datos['direccion'] ?? '';
-          _fotoPerfilUrl = datos['foto_perfil'] ??
-              ''; // 🔥 Jalamos la foto de la base de datos
+          _fotoPerfilUrl = datos['foto_perfil'] ?? '';
+
+          _latitudSeleccionada =
+              double.tryParse(datos['latitud']?.toString() ?? '');
+          _longitudSeleccionada =
+              double.tryParse(datos['longitud']?.toString() ?? '');
+
           _cargando = false;
         });
       }
@@ -108,22 +115,44 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
           'telefono': _telefonoCtrl.text.trim(),
           'correo': _correoCtrl.text.trim(),
           'direccion': _direccionCtrl.text.trim(),
+          'latitud': _latitudSeleccionada,
+          'longitud': _longitudSeleccionada,
         }),
       );
 
-
       if (respuesta.statusCode == 200) {
+        final datosRes = json.decode(utf8.decode(respuesta.bodyBytes));
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("✅ Perfil actualizado exitosamente"),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context);
+
+        if (datosRes['status'] == 'ok' || datosRes['status'] == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("✅ Perfil y ubicación guardados permanentemente"),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.pop(context);
+          return;
+        }
       }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("⚠️ Error al guardar en el servidor."),
+          backgroundColor: Colors.red,
+        ),
+      );
     } catch (e) {
       debugPrint("🚨 Error al guardar: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Error de conexión con la central."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
 
     setState(() => _guardando = false);
@@ -131,7 +160,6 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
 
   @override
   Widget build(BuildContext context) {
-    // 🔥 Lógica para saber si usamos la foto del servidor
     bool tieneFotoRed =
         _fotoPerfilUrl.isNotEmpty && _fotoPerfilUrl != "Sin foto";
     String urlCompleta = "$urlCentral$_fotoPerfilUrl";
@@ -152,7 +180,6 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                 key: _formKey,
                 child: Column(
                   children: [
-                    // 🔥 CÍRCULO CON LA FOTO CARGADA Y EL LAPICITO
                     GestureDetector(
                       onTap: _cambiarFoto,
                       child: Stack(
@@ -161,19 +188,16 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                           CircleAvatar(
                             radius: 55,
                             backgroundColor: Colors.grey.shade300,
-                            // Si acaba de elegir una foto de galería, la muestra. Si no, muestra la del servidor.
                             backgroundImage: _imagenLocal != null
                                 ? FileImage(_imagenLocal!)
                                 : (tieneFotoRed
                                     ? NetworkImage(urlCompleta)
                                     : null) as ImageProvider?,
-                            // Si no hay ninguna de las dos, muestra el ícono por defecto
                             child: (_imagenLocal == null && !tieneFotoRed)
                                 ? const Icon(Icons.person,
                                     size: 50, color: Colors.white)
                                 : null,
                           ),
-                          // EL LAPICITO EN LA ESQUINITA
                           Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
@@ -188,7 +212,6 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                       ),
                     ),
                     const SizedBox(height: 30),
-
                     TextFormField(
                       controller: _nombreCtrl,
                       decoration: const InputDecoration(
@@ -198,7 +221,6 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                       ),
                     ),
                     const SizedBox(height: 20),
-
                     TextFormField(
                       controller: _telefonoCtrl,
                       keyboardType: TextInputType.phone,
@@ -209,7 +231,6 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                       ),
                     ),
                     const SizedBox(height: 20),
-
                     TextFormField(
                       controller: _correoCtrl,
                       keyboardType: TextInputType.emailAddress,
@@ -220,18 +241,44 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                       ),
                     ),
                     const SizedBox(height: 20),
-
                     TextFormField(
                       controller: _direccionCtrl,
                       maxLines: 2,
-                      decoration: const InputDecoration(
-                        labelText: "Dirección de Entrega",
-                        prefixIcon: Icon(Icons.location_on),
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: "Dirección de Entrega Exacta",
+                        prefixIcon: const Icon(Icons.location_on),
+                        border: const OutlineInputBorder(),
+                        hintText: "Ej. Casa color azul frente al parque",
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.map_rounded,
+                              color: Color(0xFF1E3A8A), size: 28),
+                          tooltip: "Marcar ubicación exacta en el mapa",
+                          onPressed: () async {
+                            final resultadoUbicacion = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => SelectorMapaPantalla(
+                                  initialLat: _latitudSeleccionada,
+                                  initialLon: _longitudSeleccionada,
+                                ),
+                              ),
+                            );
+
+                            if (resultadoUbicacion != null) {
+                              setState(() {
+                                _direccionCtrl.text =
+                                    resultadoUbicacion['direccion'];
+                                _latitudSeleccionada =
+                                    resultadoUbicacion['latitud'];
+                                _longitudSeleccionada =
+                                    resultadoUbicacion['longitud'];
+                              });
+                            }
+                          },
+                        ),
                       ),
                     ),
                     const SizedBox(height: 30),
-
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(double.infinity, 50),
@@ -245,27 +292,6 @@ class _VistaEditarPerfilState extends State<VistaEditarPerfil> {
                                   color: Colors.white,
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(height: 30),
-                    const Divider(),
-
-                    ListTile(
-                      leading: const Icon(Icons.map, color: Color(0xFF1E3A8A)),
-                      title: const Text("Ver Mi Dirección",
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: const Text("Revisa dónde llegarán tus pedidos"),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => VistaDirecciones(
-                              idUsuario: widget.idUsuario,
-                              direccionActual: _direccionCtrl.text,
-                            ),
-                          ),
-                        ).then((_) => _cargarDatosActuales());
-                      },
                     ),
                   ],
                 ),

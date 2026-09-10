@@ -1,5 +1,5 @@
 # ========================================================
-# ARCHIVO COMPLETO: tuberias_admin.py (PODER TOTAL Y FOTOS DE LOCALES)
+# ARCHIVO COMPLETO: tuberias_admin.py (PODER TOTAL BLINDADO)
 # ========================================================
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -43,12 +43,13 @@ def registrar_auditoria(accion: str):
     conexion.close()
 
 # ========================================================
-# 1. RADAR Y DESPACHO EN VIVO
+# 1. RADAR Y DESPACHO EN VIVO (Filtrado estricto unificado)
 # ========================================================
 @router.get("/api/admin/radar_despacho")
 def radar_despacho():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
+    # 🔥 Excluimos explícitamente 'entregado', 'cancelado' y 'archivado' para que no queden fantasmas en el mapa
     cursor.execute("""
         SELECT 
             p.id_pedido, p.descripcion, p.estado, p.total_pago, p.distancia_km,
@@ -57,7 +58,7 @@ def radar_despacho():
         FROM pedidos p
         JOIN comercios c ON p.id_comercio = c.id_comercio
         LEFT JOIN usuarios u_rep ON p.id_repartidor = u_rep.id_usuario
-        WHERE p.estado IN ('pendiente', 'preparacion', 'listo_recoleccion', 'asignado', 'en_camino')
+        WHERE p.estado NOT IN ('entregado', 'cancelado', 'archivado')
         ORDER BY p.id_pedido ASC
     """)
     rutas = cursor.fetchall()
@@ -68,11 +69,11 @@ def radar_despacho():
         "total": r[3], "distancia": r[4], "repartidor": r[5], 
         "comercio": r[6], "lat": r[7], "lon": r[8]
     } for r in rutas]
+
 @router.get("/api/admin/flota_activa")
 def flota_activa():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    # 🔥 EXTRAEMOS LA FOTO Y TELÉFONO DEL MOTORISTA
     cursor.execute("""
         SELECT DISTINCT p.id_repartidor, p.latitud_repartidor, p.longitud_repartidor, 
                u.nombre, COALESCE(u.foto_perfil, 'Sin foto'), COALESCE(u.telefono, 'Sin teléfono')
@@ -127,14 +128,10 @@ def juzgar_comercio(d: DecisionJuez):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE comercios SET estado = ? WHERE id_comercio = ?", (d.nuevo_estado, d.id_objetivo))
-    
     if cursor.rowcount == 0:
-        conexion.rollback()
-        conexion.close()
+        conexion.rollback(); conexion.close()
         return {"status": "error", "mensaje": "Comercio no encontrado."}
-
-    conexion.commit()
-    conexion.close()
+    conexion.commit(); conexion.close()
     registrar_auditoria(f"Comercio ID {d.id_objetivo} cambiado permanentemente a estado: {d.nuevo_estado}")
     return {"status": "ok", "mensaje": "Estado actualizado de forma permanente"}
 
@@ -143,35 +140,37 @@ def juzgar_repartidor(d: DecisionJuez):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE usuarios SET estado = ? WHERE id_usuario = ?", (d.nuevo_estado, d.id_objetivo))
-    
     if cursor.rowcount == 0:
-        conexion.rollback()
-        conexion.close()
+        conexion.rollback(); conexion.close()
         return {"status": "error", "mensaje": "Usuario repartidor no encontrado."}
-
-    conexion.commit()
-    conexion.close()
+    conexion.commit(); conexion.close()
     registrar_auditoria(f"Usuario ID {d.id_objetivo} cambiado permanentemente a estado: {d.nuevo_estado}")
     return {"status": "ok", "mensaje": "Estado actualizado de forma permanente"}
 
 # ========================================================
-# 4. INCINERADOR DE PEDIDOS
+# 4. INCINERADOR DE PEDIDOS (AHORA CON "SOFT DELETE")
 # ========================================================
 @router.post("/api/cancelar_pedido")
 def forzar_cancelacion(req: CancelarReq):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("DELETE FROM pedidos WHERE id_pedido = ?", (req.id_pedido,))
+    
+    # 🔥 MEJORA: Ya no borramos de raíz. Lo pasamos a 'cancelado'. 
+    # Desaparece de la vista, pero se guarda en base de datos.
+    cursor.execute("UPDATE pedidos SET estado = 'cancelado' WHERE id_pedido = ?", (req.id_pedido,))
     
     if cursor.rowcount == 0:
         conexion.rollback()
         conexion.close()
-        return {"status": "error", "mensaje": "Pedido no encontrado para eliminar."}
+        return {"status": "error", "mensaje": "Pedido no encontrado para cancelar."}
+
+    # 🔥 POTENCIA: Si el pedido tenía un chat abierto, lo cerramos automáticamente para no dejar basura
+    cursor.execute("UPDATE soporte SET estado = 'resuelto' WHERE id_pedido = ?", (req.id_pedido,))
 
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"Pedido fantasma #{req.id_pedido} eliminado de raíz permanentemente.")
-    return {"status": "ok", "mensaje": "Pedido eliminado de raíz de forma permanente."}
+    registrar_auditoria(f"Pedido #{req.id_pedido} cancelado por administración.")
+    return {"status": "ok", "mensaje": "Pedido cancelado. Ya no aparecerá en el radar, pero queda guardado en el historial."}
 
 # ========================================================
 # 5. DIRECTORIO MAESTRO Y CONTROL ABSOLUTO
@@ -180,25 +179,14 @@ def forzar_cancelacion(req: CancelarReq):
 def metricas_globales():
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    
-    # Contamos clientes
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE LOWER(rol) = 'cliente'")
     clientes = cursor.fetchone()[0]
-    
-    # Contamos repartidores o motoristas[cite: 6]
     cursor.execute("SELECT COUNT(*) FROM usuarios WHERE LOWER(rol) IN ('repartidor', 'motorista')")
     repartidores = cursor.fetchone()[0]
-    
-    # Cuenta absolutamente todos los comercios sin importar el estado[cite: 6]
     cursor.execute("SELECT COUNT(*) FROM comercios")
     comercios = cursor.fetchone()[0]
-    
     conexion.close()
-    return {
-        "clientes": clientes, 
-        "repartidores": repartidores, 
-        "comercios": comercios
-    }
+    return {"clientes": clientes, "repartidores": repartidores, "comercios": comercios}
 
 @router.get("/api/admin/directorio_completo")
 def directorio_completo():
@@ -232,7 +220,6 @@ def directorio_completo():
         "vehiculo": "N/A", "licencia": "N/A", "placa": "N/A", "plan": r[8], "tipo": "comercio"
     } for r in cursor.fetchall()]
     conexion.close()
-    
     return {"directorio": usuarios + comercios}
 
 @router.post("/api/admin/eliminar_usuario")
@@ -240,15 +227,11 @@ def eliminar_usuario(req: BorrarReq):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM usuarios WHERE id_usuario = ?", (req.id_objetivo,))
-    
     if cursor.rowcount == 0:
-        conexion.rollback()
-        conexion.close()
+        conexion.rollback(); conexion.close()
         return {"status": "error", "mensaje": "Usuario no encontrado."}
-
-    conexion.commit()
-    conexion.close()
-    registrar_auditoria(f"Usuario ID {req.id_objetivo} eliminado permanentemente de disco.")
+    conexion.commit(); conexion.close()
+    registrar_auditoria(f"Usuario ID {req.id_objetivo} eliminado permanentemente.")
     return {"status": "ok"}
 
 @router.post("/api/admin/eliminar_comercio")
@@ -256,19 +239,15 @@ def eliminar_comercio(req: BorrarReq):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM comercios WHERE id_comercio = ?", (req.id_objetivo,))
-    
     if cursor.rowcount == 0:
-        conexion.rollback()
-        conexion.close()
+        conexion.rollback(); conexion.close()
         return {"status": "error", "mensaje": "Comercio no encontrado."}
-
-    conexion.commit()
-    conexion.close()
-    registrar_auditoria(f"Comercio ID {req.id_objetivo} eliminado permanentemente de disco.")
+    conexion.commit(); conexion.close()
+    registrar_auditoria(f"Comercio ID {req.id_objetivo} eliminado permanentemente.")
     return {"status": "ok"}
 
 # ========================================================
-# 🔥 6. CONTROL MASIVO DE LOCALES (Para pruebas rápidas)
+# 6. CONTROL MASIVO DE LOCALES
 # ========================================================
 @router.post("/api/admin/estado_masivo_comercios")
 def estado_masivo_comercios(datos: AccionMasiva):
@@ -278,11 +257,11 @@ def estado_masivo_comercios(datos: AccionMasiva):
     cursor.execute("UPDATE comercios SET estado = ?", (nuevo_estado,))
     conexion.commit()
     conexion.close()
-    registrar_auditoria(f"ADMIN DICTATORIAL: Todos los comercios cambiados masivamente y de forma permanente a estado: {nuevo_estado}")
+    registrar_auditoria(f"ADMIN DICTATORIAL: Todos los comercios cambiados masivamente a estado: {nuevo_estado}")
     return {"status": "ok", "mensaje": f"Todos los negocios ahora están {nuevo_estado}s de forma permanente."}
 
 # ========================================================
-# 7. NUEVAS TUBERÍAS DE PODER TOTAL (AUDITORÍA Y DIFUSIÓN)
+# 7. AUDITORÍA Y DIFUSIÓN
 # ========================================================
 @router.get("/api/admin/auditoria_logs")
 def ver_auditoria():

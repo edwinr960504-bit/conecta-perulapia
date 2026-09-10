@@ -1,7 +1,9 @@
+import 'acceso_soporte.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http; // Agregado para llamar a la API
 import 'dart:convert'; // Agregado para leer JSON
 import 'red.dart'; // Agregado para usar urlCentral
+
 
 import 'carrito_service.dart';
 import 'vista_login.dart';
@@ -360,86 +362,31 @@ class SoporteConsumidorPantalla extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 10),
               child: Text(
-                "¿Tienes problemas con tu pedido, la entrega o necesitas ayuda? Comunícate de inmediato con la central.",
+                "¿Tienes problemas con tu pedido, la entrega o necesitas ayuda? Ingresa el código de rastreo de tu compra para reportarlo.",
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
             ),
             const SizedBox(height: 35),
+
+            // 🔥 BOTÓN DE SOPORTE POR PEDIDO (AHORA TE PIDE EL CÓDIGO DE RASTREO)
             Card(
               elevation: 2,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16)),
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
-                onTap: () async {
-                  // 🔥 Indicador de carga mientras la app detecta el pedido automáticamente
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (ctx) => const Center(
-                        child: CircularProgressIndicator(color: colorTema)),
+                onTap: () {
+                  // Redirige de inmediato a la pantalla donde se digita el código CP-XXXXX
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => AccesoSoporte(
+                        idCliente: idCliente,
+                        nombreCliente: nombreCliente,
+                      ),
+                    ),
                   );
-
-                  int idPedidoFinal = 0;
-                  bool tieneTicketAbierto = false;
-
-                  try {
-                    // 1. Revisar si ya hay un chat/ticket abierto guardado
-                    final resTickets = await http.get(Uri.parse(
-                        '$urlCentral/api/cliente/mis_tickets/$idCliente'));
-                    if (resTickets.statusCode == 200) {
-                      final List tickets =
-                          json.decode(utf8.decode(resTickets.bodyBytes));
-                      for (var t in tickets) {
-                        if (t['estado'] != 'resuelto') {
-                          tieneTicketAbierto = true;
-                          idPedidoFinal = t['id_pedido'];
-                          break;
-                        }
-                      }
-                    }
-
-                    // 2. Si no hay ticket abierto, buscar automáticamente el pedido activo actual
-                    if (!tieneTicketAbierto) {
-                      final resPedidos = await http.get(Uri.parse(
-                          '$urlCentral/api/pedidos_activos/cliente/$idCliente'));
-                      if (resPedidos.statusCode == 200) {
-                        final List pedidos =
-                            json.decode(utf8.decode(resPedidos.bodyBytes));
-                        if (pedidos.isNotEmpty) {
-                          idPedidoFinal = pedidos[0]['id_pedido'];
-                        }
-                      }
-                    }
-                  } catch (e) {
-                    debugPrint("Error buscando pedido automático: $e");
-                  }
-
-                  // Quitar el indicador de carga
-                  if (context.mounted) Navigator.pop(context);
-
-                  // 3. Abrir el chat automáticamente si se encontró el pedido, sin pedir números
-                  if (idPedidoFinal > 0 && context.mounted) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ChatSoporte(
-                          idPedido: idPedidoFinal,
-                          remitente: nombreCliente,
-                          canal: "admin_cliente",
-                        ),
-                      ),
-                    );
-                  } else if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                            "⚠️ No tienes ningún pedido activo en este momento para reportar."),
-                        backgroundColor: Colors.orange,
-                      ),
-                    );
-                  }
                 },
                 child: Padding(
                   padding: const EdgeInsets.all(18.0),
@@ -464,7 +411,7 @@ class SoporteConsumidorPantalla extends StatelessWidget {
                                     fontWeight: FontWeight.bold, fontSize: 16)),
                             SizedBox(height: 4),
                             Text(
-                                "Reporta incidencias con el platillo, entrega o local.",
+                                "Ingresa tu código de rastreo para levantar reporte.",
                                 style: TextStyle(
                                     color: Colors.grey, fontSize: 13)),
                           ],
@@ -478,6 +425,8 @@ class SoporteConsumidorPantalla extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+
+            // SOPORTE PERSONAL / GENERAL
             Card(
               elevation: 2,
               shape: RoundedRectangleBorder(

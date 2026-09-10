@@ -1,3 +1,4 @@
+// Archivo: comer_cocina.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -131,7 +132,7 @@ class _VistaCocinaState extends State<VistaCocina> {
       if (exito) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("¡Orden en preparación!"),
+            content: Text("¡Orden en preparación guardada permanentemente!"),
             backgroundColor: Colors.green,
           ),
         );
@@ -142,7 +143,7 @@ class _VistaCocinaState extends State<VistaCocina> {
     }
   }
 
-  // 🔥 FUNCIÓN EXTRAÍDA: Muestra el diálogo del PIN para entregar el pedido
+  // 🔥 DIÁLOGO DE ENTREGA BLINDADO CON CONFIRMACIÓN PERMANENTE
   void _mostrarDialogoEntrega(int idPed) {
     final pinCtrl = TextEditingController();
     showDialog(
@@ -184,7 +185,7 @@ class _VistaCocinaState extends State<VistaCocina> {
               if (resultado == "OK") {
                 mensajero.showSnackBar(
                   const SnackBar(
-                    content: Text("¡Entregado! El cliente fue notificado."),
+                    content: Text("¡Entregado y registrado permanentemente!"),
                     backgroundColor: Colors.green,
                   ),
                 );
@@ -249,7 +250,6 @@ class _VistaCocinaState extends State<VistaCocina> {
                     body: json.encode({"abierto": nuevoValor}),
                   );
 
-                  // 🔥 VALIDACIÓN BLINDADA Y LIMPIA CON EL JSON DE RESPUESTA
                   final datosResq =
                       json.decode(utf8.decode(respuesta.bodyBytes));
 
@@ -268,7 +268,7 @@ class _VistaCocinaState extends State<VistaCocina> {
                     mensajero.showSnackBar(
                       SnackBar(
                         content: Text(nuevoValor
-                            ? "¡Local abierto al público!"
+                            ? "¡Local abierto permanentemente!"
                             : "Local cerrado correctamente."),
                         backgroundColor: Colors.green,
                       ),
@@ -443,7 +443,6 @@ class _VistaCocinaState extends State<VistaCocina> {
                                     Column(
                                       children: [
                                         if (motoristaAsignado) ...[
-                                          // 🔥 CONEXIÓN MÁGICA CON EL MAPA DEL COMERCIO
                                           BotonRepartidorEnCamino(
                                             onPressed: () async {
                                               final entregar =
@@ -458,7 +457,6 @@ class _VistaCocinaState extends State<VistaCocina> {
                                                   ),
                                                 ),
                                               );
-                                              // Si el comerciante apretó "ENTREGAR AL MOTORISTA" dentro del mapa
                                               if (entregar == true) {
                                                 _mostrarDialogoEntrega(idPed);
                                               }

@@ -1,3 +1,4 @@
+// Archivo: comer_menu.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -191,7 +192,6 @@ class _VistaMenuState extends State<VistaMenu> {
                       navegador.pop();
                       setState(() => _cargando = true);
 
-                      // 1. PRIMERO CREAMOS EL PLATILLO SIN FOTO PARA OBTENER SU ID REAL
                       final bool exitoCreacion =
                           await _productoService.agregarProducto({
                         'id_comercio': int.tryParse(widget.idComercio) ?? 1,
@@ -203,14 +203,11 @@ class _VistaMenuState extends State<VistaMenu> {
                       });
 
                       if (exitoCreacion) {
-                        // Si se seleccionó una foto, necesitamos el ID del último producto creado para asociarla
                         if (imagenSeleccionada != null) {
                           try {
-                            // Consultamos rápidamente los productos del comercio para ubicar el ID recién creado
                             final prodsActualizados = await _productoService
                                 .obtenerProductos(widget.idComercio);
                             if (prodsActualizados.isNotEmpty) {
-                              // Tomamos el primero de la lista (que por orden de ID reciente es el nuevo)
                               final ultimoProd = prodsActualizados.last;
                               final int idRecienCreado = int.tryParse(
                                       ultimoProd['id']?.toString() ??
@@ -460,19 +457,21 @@ class _VistaMenuState extends State<VistaMenu> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
+                                    // 🔥 SWITCH BLINDADO: Espera confirmación real del servidor
                                     Switch(
                                       value: isAvailable,
                                       activeTrackColor: Colors.green,
                                       onChanged: (bool val) async {
-                                        setState(() {
-                                          _productos[index]['disponible'] = val;
-                                        });
+                                        final int idProd = int.tryParse(
+                                                prod['id']?.toString() ??
+                                                    prod['id_producto']
+                                                        ?.toString() ??
+                                                    '0') ??
+                                            0;
                                         try {
-                                          final idProd =
-                                              prod['id'] ?? prod['id_producto'];
                                           final url = Uri.parse(
                                               '$urlCentral/api/actualizar_producto');
-                                          await http.post(
+                                          final respuesta = await http.post(
                                             url,
                                             headers: {
                                               "Content-Type": "application/json"
@@ -483,9 +482,19 @@ class _VistaMenuState extends State<VistaMenu> {
                                               "precio": precio,
                                             }),
                                           );
+                                          if (respuesta.statusCode == 200) {
+                                            final data = json.decode(utf8
+                                                .decode(respuesta.bodyBytes));
+                                            if (data['status'] == 'ok') {
+                                              setState(() {
+                                                _productos[index]
+                                                    ['disponible'] = val;
+                                              });
+                                            }
+                                          }
                                         } catch (e) {
                                           debugPrint(
-                                              "Error al actualizar estado: $e");
+                                              "Error al actualizar disponibilidad: $e");
                                         }
                                       },
                                     ),

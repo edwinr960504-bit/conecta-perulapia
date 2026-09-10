@@ -1,4 +1,6 @@
+// Archivo: cli_rastreo.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 🔥 IMPORTANTE PARA USAR EL PORTAPAPELES
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -78,7 +80,7 @@ class _CliRastreoState extends State<CliRastreo> {
   bool _cargando = true;
 
   Timer? _latidosClienteTimer;
-  Timer? _timerMonitoreoPedidos; // 🔥 EL NUEVO MOTOR AUTOMÁTICO
+  Timer? _timerMonitoreoPedidos;
 
   LatLng? _miUbicacionReal;
 
@@ -87,7 +89,6 @@ class _CliRastreoState extends State<CliRastreo> {
     super.initState();
     _cargarPedidosSilencioso();
 
-    // 🔥 LATIDO: Trae los cambios de estado automáticamente cada 4 seg
     _timerMonitoreoPedidos =
         Timer.periodic(const Duration(seconds: 4), (timer) {
       _cargarPedidosSilencioso();
@@ -141,7 +142,6 @@ class _CliRastreoState extends State<CliRastreo> {
     });
   }
 
-  // 🔥 NUEVA FUNCIÓN DE CARGA FLUIDA SIN BLOQUEAR LA PANTALLA
   Future<void> _cargarPedidosSilencioso() async {
     final url = Uri.parse(
         '$urlCentral/api/pedidos_activos/cliente/${widget.idCliente}');
@@ -229,6 +229,158 @@ class _CliRastreoState extends State<CliRastreo> {
     }
   }
 
+  // VENTANA EMERGENTE PARA VER FOTOS Y DETALLES EN GRANDE
+  void _mostrarDetalleCompra(
+      BuildContext context, List<dynamic> fotos, String descripcion) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          "Detalle del Pedido",
+          style:
+              TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0055A4)),
+          textAlign: TextAlign.center,
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Lo que ordenaste:",
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Text(
+                  descripcion,
+                  style: const TextStyle(fontSize: 15, color: Colors.black87),
+                ),
+              ),
+              if (fotos.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                const Text("Galería:",
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                Center(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: fotos.map((f) {
+                      final rutaLimpia = f['foto'].toString().startsWith('http')
+                          ? f['foto']
+                          : "$urlCentral${f['foto']}"
+                              .replaceAll('//fotos', '/fotos')
+                              .replaceAll('//static', '/static');
+
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          rutaLimpia,
+                          width: 110,
+                          height: 110,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 110,
+                            height: 110,
+                            color: Colors.grey.shade200,
+                            child: const Icon(Icons.fastfood,
+                                color: Colors.grey, size: 30),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ]
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0055A4),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cerrar",
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _construirGaleriaProductos(
+      BuildContext context, List<dynamic>? productos, String descripcion) {
+    if (productos == null || productos.isEmpty) {
+      return GestureDetector(
+        onTap: () => _mostrarDetalleCompra(context, [], descripcion),
+        child: const CircleAvatar(
+          radius: 26,
+          backgroundColor: Color(0xFF0055A4),
+          child: Icon(Icons.receipt_long, color: Colors.white, size: 24),
+        ),
+      );
+    }
+
+    final fotosAMostrar = productos.take(3).toList();
+
+    return GestureDetector(
+      onTap: () => _mostrarDetalleCompra(context, productos, descripcion),
+      child: SizedBox(
+        width: 60,
+        height: 50,
+        child: Stack(
+          children: [
+            for (int i = 0; i < fotosAMostrar.length; i++)
+              Positioned(
+                left: (i * 16).toDouble(),
+                top: (i * 4).toDouble(),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black26, blurRadius: 2)
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.network(
+                      fotosAMostrar[i]['foto'].toString().startsWith('http')
+                          ? fotosAMostrar[i]['foto']
+                          : "$urlCentral${fotosAMostrar[i]['foto']}"
+                              .replaceAll('//fotos', '/fotos')
+                              .replaceAll('//static', '/static'),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, error, ___) {
+                        return Container(
+                          color: Colors.grey.shade300,
+                          child: const Icon(Icons.fastfood,
+                              size: 16, color: Colors.grey),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -277,6 +429,12 @@ class _CliRastreoState extends State<CliRastreo> {
                       final bool enCamino = (p['en_camino'] == true ||
                           estadoCodigo == 'en_camino');
 
+                      final String codigoRastreoTexto =
+                          p['codigo_rastreo'] ?? 'CP-0000';
+                      final String descripcionPedido =
+                          p['descripcion'] ?? 'Sin detalle';
+                      final List<dynamic>? productosPedido = p['productos'];
+
                       String textoLlegadaExtra = "";
                       if (enCamino &&
                           _miUbicacionReal != null &&
@@ -313,11 +471,8 @@ class _CliRastreoState extends State<CliRastreo> {
                                 children: [
                                   Row(
                                     children: [
-                                      const CircleAvatar(
-                                        backgroundColor: Color(0xFF0055A4),
-                                        child: Icon(Icons.receipt_long,
-                                            color: Colors.white),
-                                      ),
+                                      _construirGaleriaProductos(context,
+                                          productosPedido, descripcionPedido),
                                       const SizedBox(width: 12),
                                       Column(
                                         crossAxisAlignment:
@@ -329,13 +484,78 @@ class _CliRastreoState extends State<CliRastreo> {
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 18),
                                           ),
-                                          Text(
-                                            "Serial: ${p['codigo_rastreo'] ?? 'CP-0000'}",
-                                            style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.blueGrey),
+
+                                          // SERIAL CON ALERTA DE CONFIRMACIÓN AL TOCAR
+                                          GestureDetector(
+                                            onTap: () {
+                                              showDialog(
+                                                context: context,
+                                                builder: (ctx) => AlertDialog(
+                                                  title: const Text(
+                                                      "Código de Pedido"),
+                                                  content: Text(
+                                                      "¿Deseas copiar el código $codigoRastreoTexto al portapapeles para usarlo en soporte?"),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(ctx),
+                                                      child: const Text(
+                                                          "Cancelar"),
+                                                    ),
+                                                    ElevatedButton(
+                                                      style: ElevatedButton
+                                                          .styleFrom(
+                                                              backgroundColor:
+                                                                  const Color(
+                                                                      0xFF0055A4)),
+                                                      onPressed: () {
+                                                        Clipboard.setData(
+                                                            ClipboardData(
+                                                                text:
+                                                                    codigoRastreoTexto));
+                                                        Navigator.pop(ctx);
+                                                        ScaffoldMessenger.of(
+                                                                context)
+                                                            .showSnackBar(
+                                                          SnackBar(
+                                                            content: Text(
+                                                                "¡Código $codigoRastreoTexto copiado con éxito!"),
+                                                            backgroundColor:
+                                                                Colors.green,
+                                                            duration:
+                                                                const Duration(
+                                                                    seconds: 2),
+                                                          ),
+                                                        );
+                                                      },
+                                                      child: const Text(
+                                                          "Copiar Código",
+                                                          style: TextStyle(
+                                                              color: Colors
+                                                                  .white)),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                            child: Row(
+                                              children: [
+                                                Text(
+                                                  "Serial: $codigoRastreoTexto",
+                                                  style: const TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Color(0xFF0055A4)),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                const Icon(Icons.copy_rounded,
+                                                    size: 14,
+                                                    color: Color(0xFF0055A4)),
+                                              ],
+                                            ),
                                           ),
+
                                           Text(
                                             "${p['fecha'] ?? 'Hoy'}",
                                             style: const TextStyle(

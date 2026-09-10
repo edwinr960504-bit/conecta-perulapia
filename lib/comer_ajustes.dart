@@ -5,7 +5,6 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'selector_mapa.dart';
-
 import 'red.dart';
 
 class VistaAjustesLocal extends StatefulWidget {
@@ -62,7 +61,6 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
             _longitudSeleccionada =
                 double.tryParse(data['longitud']?.toString() ?? '');
 
-            // 🔥 Aseguramos que el nombre del controlador local refleje exactamente lo que viene de la base de datos
             if (data['nombre_local'] != null &&
                 data['nombre_local'].toString().isNotEmpty) {
               _nombreCtrl.text = data['nombre_local'];
@@ -87,23 +85,16 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
   }
 
   Future<void> _cambiarLogo() async {
-    final XFile? fotoSeleccionada = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-    );
-
+    final XFile? fotoSeleccionada =
+        await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
     if (fotoSeleccionada != null) {
       setState(() => _logoLocal = File(fotoSeleccionada.path));
-
       try {
         var request = http.MultipartRequest(
-          'POST',
-          Uri.parse('$urlCentral/subir_foto_comercio/'),
-        );
+            'POST', Uri.parse('$urlCentral/subir_foto_comercio/'));
         request.fields['id_comercio'] = widget.idComercio.toString();
         request.files.add(
-          await http.MultipartFile.fromPath('file', fotoSeleccionada.path),
-        );
+            await http.MultipartFile.fromPath('file', fotoSeleccionada.path));
 
         var res = await request.send();
         if (res.statusCode == 200) {
@@ -112,7 +103,6 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
           String rutaServidor = jsonData['url'] ?? '';
 
           if (!mounted) return;
-
           setState(() {
             if (rutaServidor.isNotEmpty) {
               final String urlBase = rutaServidor.startsWith('http')
@@ -126,9 +116,8 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
 
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("📸 Logo del local actualizado y guardado"),
-              backgroundColor: Colors.green,
-            ),
+                content: Text("📸 Logo actualizado y guardado permanentemente"),
+                backgroundColor: Colors.green),
           );
           _cargarDatosActualesComercio();
         }
@@ -138,6 +127,7 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
     }
   }
 
+  // 🔥 GUARDADO PERMANENTE Y ESTRICTO CON CONFIRMACIÓN DE SERVIDOR
   Future<void> _guardarCambios() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _guardando = true);
@@ -159,18 +149,38 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
         }),
       );
 
-      if (respuesta.statusCode == 200 || respuesta.statusCode == 404) {
+      if (respuesta.statusCode == 200) {
+        final data = json.decode(utf8.decode(respuesta.bodyBytes));
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("✅ Ajustes y ubicación guardados correctamente"),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context, _nombreCtrl.text.trim());
+
+        if (data['status'] == 'ok') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content:
+                    Text("✅ Ajustes y ubicación guardados permanentemente"),
+                backgroundColor: Colors.green),
+          );
+          Navigator.pop(context, _nombreCtrl.text.trim());
+          return;
+        }
       }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text("⚠️ Error al guardar en el servidor. Intenta de nuevo."),
+            backgroundColor: Colors.red),
+      );
     } catch (e) {
       debugPrint("🚨 Error al guardar: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text("Error de conexión con la central."),
+              backgroundColor: Colors.red),
+        );
+      }
     }
 
     setState(() => _guardando = false);
@@ -207,20 +217,12 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                           image: _logoLocal != null
                               ? DecorationImage(
                                   image: FileImage(_logoLocal!),
-                                  fit: BoxFit.cover,
-                                )
+                                  fit: BoxFit.cover)
                               : (_urlLogoRemoto != null
                                   ? DecorationImage(
                                       image: NetworkImage(_urlLogoRemoto!),
-                                      fit: BoxFit.cover,
-                                    )
+                                      fit: BoxFit.cover)
                                   : null),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              blurRadius: 10,
-                            )
-                          ],
                         ),
                         child: (_logoLocal == null && _urlLogoRemoto == null)
                             ? const Icon(Icons.store,
@@ -230,9 +232,7 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: const BoxDecoration(
-                          color: Color(0xFF1E3A8A),
-                          shape: BoxShape.circle,
-                        ),
+                            color: Color(0xFF1E3A8A), shape: BoxShape.circle),
                         child: const Icon(Icons.camera_alt,
                             color: Colors.white, size: 20),
                       ),
@@ -242,12 +242,9 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               ),
               const SizedBox(height: 10),
               const Center(
-                child: Text(
-                  "Toca para cambiar el logo",
-                  style: TextStyle(
-                      color: Colors.grey, fontWeight: FontWeight.bold),
-                ),
-              ),
+                  child: Text("Toca para cambiar el logo",
+                      style: TextStyle(
+                          color: Colors.grey, fontWeight: FontWeight.bold))),
               const SizedBox(height: 30),
               const Text("Datos Públicos",
                   style: TextStyle(
@@ -258,10 +255,9 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               TextFormField(
                 controller: _nombreCtrl,
                 decoration: const InputDecoration(
-                  labelText: "Nombre del Local",
-                  prefixIcon: Icon(Icons.storefront),
-                  border: OutlineInputBorder(),
-                ),
+                    labelText: "Nombre del Local",
+                    prefixIcon: Icon(Icons.storefront),
+                    border: OutlineInputBorder()),
                 validator: (v) =>
                     v!.isEmpty ? "El nombre es obligatorio" : null,
               ),
@@ -305,11 +301,9 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               TextFormField(
                 controller: _horariosCtrl,
                 decoration: const InputDecoration(
-                  labelText: "Horario de Atención",
-                  prefixIcon: Icon(Icons.access_time),
-                  border: OutlineInputBorder(),
-                  hintText: "Ej. Lunes a Domingo: 8:00 AM - 9:00 PM",
-                ),
+                    labelText: "Horario de Atención",
+                    prefixIcon: Icon(Icons.access_time),
+                    border: OutlineInputBorder()),
               ),
               const Divider(height: 40, thickness: 2),
               const Text("Planes y Formas de Pago",
@@ -336,17 +330,14 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
               DropdownButtonFormField<String>(
                 initialValue: _planPago,
                 decoration: const InputDecoration(
-                  labelText: "Plan de Suscripción",
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.star, color: Colors.amber),
-                ),
+                    labelText: "Plan de Suscripción",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.star, color: Colors.amber)),
                 items: ["Comisión 10%", "Pago Mensual Fijo", "Plan Premium"]
                     .map((String v) {
                   return DropdownMenuItem(value: v, child: Text(v));
                 }).toList(),
-                onChanged: (val) {
-                  setState(() => _planPago = val!);
-                },
+                onChanged: (val) => setState(() => _planPago = val!),
               ),
               const SizedBox(height: 40),
               ElevatedButton.icon(
@@ -362,16 +353,13 @@ class _VistaAjustesLocalState extends State<VistaAjustesLocal> {
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
-                      )
+                            color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.save, color: Colors.white),
-                label: const Text(
-                  "GUARDAR CAMBIOS",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold),
-                ),
+                label: const Text("GUARDAR CAMBIOS",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
               ),
               const SizedBox(height: 20),
             ],
