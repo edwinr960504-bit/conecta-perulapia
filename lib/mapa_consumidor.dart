@@ -1,3 +1,4 @@
+// Archivo: mapa_consumidor.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -5,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'red.dart';
+import 'chat_pedido.dart';
 
 class MapaConsumidorScreen extends StatefulWidget {
   final int idPedido;
@@ -29,8 +31,10 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
   Timer? _timerMonitoreo;
   String _distanciaYtiempo = "Buscando ubicación...";
 
-  String _nombreRepartidor = "Buscando motorista...";
-  final String _vehiculoRepartidor = "En camino hacia ti";
+  String _nombreRepartidor = "Motorista";
+  bool _alertaLlegadaMostrada = false;
+  int _cantidadMensajesAnterior = 0;
+  bool _hayMensajeNuevo = false;
 
   late AnimationController _animController;
   final MapController _mapController = MapController();
@@ -44,9 +48,12 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
     )..repeat(reverse: true);
 
     _obtenerUbicacionYDetallesRepartidor();
+    _verificarLlegadaMotorista();
 
-    _timerMonitoreo = Timer.periodic(const Duration(seconds: 5), (timer) {
+    // 🔥 RADAR MODO TURBO: Se actualiza cada 3 segundos para optimizar recursos y rendimiento del teclado
+    _timerMonitoreo = Timer.periodic(const Duration(seconds: 3), (timer) {
       _obtenerUbicacionYDetallesRepartidor();
+      _verificarLlegadaMotorista();
     });
   }
 
@@ -57,10 +64,87 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
     super.dispose();
   }
 
+  // 🔥 RADAR INVISIBLE DE ALERTAS DEL SISTEMA Y CHAT
+  Future<void> _verificarLlegadaMotorista() async {
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final url = Uri.parse(
+          '$urlCentral/api/chat/historial/${widget.idPedido}?canal=motorista_consumidor&t=$timestamp');
+      final res = await http.get(url).timeout(const Duration(seconds: 2));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        List mensajes = data['mensajes'] ?? [];
+
+        // Comparamos si hay mensajes nuevos
+        if (mensajes.length > _cantidadMensajesAnterior) {
+          final ultimoMsj = mensajes.last;
+
+          // ALERTA 1: EL MOTORISTA LLEGÓ (SISTEMA)
+          if (ultimoMsj['remitente'] == 'Sistema Automático' &&
+              !_alertaLlegadaMostrada) {
+            _alertaLlegadaMostrada = true;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    ultimoMsj['mensaje'],
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                  backgroundColor: Colors.green.shade700,
+                  duration: const Duration(seconds: 8),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  margin: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).size.height * 0.75,
+                    left: 20,
+                    right: 20,
+                  ),
+                ),
+              );
+            }
+          }
+          // ALERTA 2: MENSAJE NORMAL DEL MOTORISTA (TEXTO/FOTO)
+          else if (ultimoMsj['remitente'] != 'Cliente' &&
+              ultimoMsj['remitente'] != 'Sistema Automático') {
+            if (mounted) {
+              setState(() {
+                _hayMensajeNuevo = true; // Enciende el puntito rojo en el botón
+              });
+              // Lanza una notificación cortita arriba para que sepa que le escribieron
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("📩 Nuevo mensaje de $_nombreRepartidor"),
+                  backgroundColor: Colors.blueAccent.shade700,
+                  duration: const Duration(seconds: 2),
+                  behavior: SnackBarBehavior.floating,
+                  margin: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).size.height * 0.80,
+                    left: 20,
+                    right: 20,
+                  ),
+                ),
+              );
+            }
+          }
+          // Actualizamos el contador para no repetir alertas
+          _cantidadMensajesAnterior = mensajes.length;
+        }
+      }
+    } catch (_) {
+      // Ignorar errores de red temporales en segundo plano
+    }
+  }
+
   Future<void> _obtenerUbicacionYDetallesRepartidor() async {
     try {
       final url = Uri.parse('$urlCentral/api/obtener_gps/${widget.idPedido}');
-      final res = await http.get(url).timeout(const Duration(seconds: 4));
+      final res = await http.get(url).timeout(const Duration(seconds: 2));
 
       if (res.statusCode == 200) {
         final data = json.decode(utf8.decode(res.bodyBytes));
@@ -106,8 +190,6 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
           setState(() {
             if (nombreRemoto.isNotEmpty) {
               _nombreRepartidor = nombreRemoto;
-            } else {
-              _nombreRepartidor = "Motorista Conecta";
             }
           });
         }
@@ -131,31 +213,18 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
           }
         }
       }
-    } catch (e) {
-      debugPrint("⚠️ Error obteniendo GPS: $e");
+    } catch (_) {
+      // Fallo silencioso para no interrumpir la experiencia de rastreo
     }
   }
 
-  // 🔥 CONTROLES DE CÁMARA 🔥
   void _centrarEnCasa() {
     _mapController.move(_ubicacionCasaCliente, 16.5);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("Centrado en tu ubicación"),
-        duration: Duration(milliseconds: 500)));
   }
 
   void _centrarEnMotorista() {
     if (_motoristaEnCamino) {
       _mapController.move(_ubicacionMotorista, 16.5);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Centrado en el repartidor"),
-          duration: Duration(milliseconds: 500)));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Aún esperando la señal del repartidor"),
-            duration: Duration(milliseconds: 500)),
-      );
     }
   }
 
@@ -169,17 +238,46 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
         _mapController.camera.center, _mapController.camera.zoom - 1.0);
   }
 
+  void _abrirVentanaDeChat() {
+    setState(() {
+      _hayMensajeNuevo = false;
+    });
+
+    // 🔥 Frame delay para evitar el retraso (cámara lenta) al desplegar el teclado y la ventana flotante
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.65,
+            child: ChatPedidoScreen(
+              idPedido: widget.idPedido,
+              remitente: "Cliente",
+              canal: "motorista_consumidor",
+              nombreDestino: "Hablando con $_nombreRepartidor",
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text("Rastreo: ${widget.codigoRastreo}",
-            style: const TextStyle(fontWeight: FontWeight.bold)),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         backgroundColor: const Color(0xFF0055A4),
         foregroundColor: Colors.white,
       ),
       body: Stack(
         children: [
+          // 🗺️ MAPA LIBRE Y A PANTALLA COMPLETA
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -248,191 +346,113 @@ class _MapaConsumidorScreenState extends State<MapaConsumidorScreen>
             ],
           ),
 
-          // 🔘 COLUMNA DE BOTONES LATERALES (+, -, Moto, Mi Ubicación)
-          Positioned(
-            right: 16,
-            bottom: 150, // Espacio para que no choque con el panel de abajo
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton(
-                  heroTag: "btnZoomInCli",
-                  mini: true,
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFF0055A4),
-                  elevation: 4,
-                  onPressed: _zoomIn,
-                  child: const Icon(Icons.add),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: "btnZoomOutCli",
-                  mini: true,
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFF0055A4),
-                  elevation: 4,
-                  onPressed: _zoomOut,
-                  child: const Icon(Icons.remove),
-                ),
-                const SizedBox(height: 16),
-                FloatingActionButton(
-                  heroTag: "btnUbicarMotoristaCli",
-                  backgroundColor: Colors.orange.shade800,
-                  foregroundColor: Colors.white,
-                  elevation: 4,
-                  onPressed: _centrarEnMotorista,
-                  tooltip: "Ubicar repartidor",
-                  child: const Icon(Icons.motorcycle), // 🔥 Icono de Moto
-                ),
-                const SizedBox(height: 12),
-                FloatingActionButton(
-                  heroTag: "btnCentrarCasaCli",
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFF0055A4),
-                  elevation: 4,
-                  onPressed: _centrarEnCasa,
-                  tooltip: "Centrar en mi ubicación",
-                  child: const Icon(
-                      Icons.my_location), // 🔥 Icono de Flechita (GPS)
-                ),
-              ],
-            ),
-          ),
-
-          // 📊 PANEL INFERIOR INTERACTIVO
-          Positioned(
-            bottom: 20,
-            left: 16,
-            right: 16,
-            child: GestureDetector(
-              onTap: _centrarEnMotorista, // 🔥 Si toca el panel, busca la moto
+          // ⏳ PÍLDORA DISCRETA DE TIEMPO EN LA PARTE SUPERIOR
+          if (_motoristaEnCamino)
+            Positioned(
+              top: 16,
+              left: 20,
+              right: 20,
               child: Container(
-                padding: const EdgeInsets.all(16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
+                  color: Colors.white.withValues(alpha: 0.95),
+                  borderRadius: BorderRadius.circular(30),
                   boxShadow: const [
                     BoxShadow(
                         color: Colors.black26,
-                        blurRadius: 10,
-                        offset: Offset(0, 4))
+                        blurRadius: 8,
+                        offset: Offset(0, 3))
                   ],
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              shape: BoxShape.circle),
-                          child: const Icon(Icons.delivery_dining,
-                              color: Color(0xFF0055A4), size: 26),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _motoristaEnCamino
-                                    ? "¡Tu comida va en camino! (Toca para ubicar)"
-                                    : "Esperando al repartidor...",
-                                style: const TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _distanciaYtiempo,
-                                style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (_cargando)
-                          const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Color(0xFF0055A4)))
-                      ],
-                    ),
-                    const Divider(height: 18),
-                    Row(
-                      children: [
-                        const CircleAvatar(
-                          radius: 22,
-                          backgroundColor: Color(0xFF0055A4),
-                          child:
-                              Icon(Icons.person, color: Colors.white, size: 26),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(_nombreRepartidor,
-                                  style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 2),
-                              Text(_vehiculoRepartidor,
-                                  style: const TextStyle(
-                                      color: Colors.grey, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert, color: Colors.grey),
-                          onSelected: (value) {
-                            if (value == 'llamar') {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                      content: Text(
-                                          "Llamando a $_nombreRepartidor...")));
-                            } else if (value == 'mensaje') {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text("Abriendo chat...")));
-                            }
-                          },
-                          itemBuilder: (BuildContext context) =>
-                              <PopupMenuEntry<String>>[
-                            const PopupMenuItem<String>(
-                              value: 'llamar',
-                              child: Row(children: [
-                                Icon(Icons.phone,
-                                    color: Colors.green, size: 20),
-                                SizedBox(width: 10),
-                                Text("Llamar al motorista")
-                              ]),
-                            ),
-                            const PopupMenuItem<String>(
-                              value: 'mensaje',
-                              child: Row(children: [
-                                Icon(Icons.chat_bubble,
-                                    color: Colors.blue, size: 20),
-                                SizedBox(width: 10),
-                                Text("Enviar mensaje")
-                              ]),
-                            ),
-                          ],
-                        ),
-                      ],
+                    const Icon(Icons.two_wheeler,
+                        color: Color(0xFF0055A4), size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _distanciaYtiempo,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.black87),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
+
+          // 🎛️ TODOS LOS CONTROLES APILADOS EN LA ESQUINA INFERIOR DERECHA
+          Positioned(
+            right: 16,
+            bottom: 24,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton(
+                  heroTag: "btnZoomIn",
+                  mini: true,
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF0055A4),
+                  onPressed: _zoomIn,
+                  child: const Icon(Icons.add),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: "btnZoomOut",
+                  mini: true,
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF0055A4),
+                  onPressed: _zoomOut,
+                  child: const Icon(Icons.remove),
+                ),
+                const SizedBox(height: 16),
+                FloatingActionButton(
+                  heroTag: "btnUbicarMotorista",
+                  backgroundColor: Colors.orange.shade800,
+                  foregroundColor: Colors.white,
+                  onPressed: _centrarEnMotorista,
+                  tooltip: "Ubicar repartidor",
+                  child: const Icon(Icons.motorcycle),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: "btnCentrarCasa",
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF0055A4),
+                  onPressed: _centrarEnCasa,
+                  tooltip: "Centrar en mi ubicación",
+                  child: const Icon(Icons.my_location),
+                ),
+                const SizedBox(height: 24),
+
+                // 💬 BOTÓN DE CHAT CON CAMPANITA (BADGE)
+                FloatingActionButton.extended(
+                  heroTag: "btnChatFlotante",
+                  backgroundColor: Colors.blueAccent.shade700,
+                  foregroundColor: Colors.white,
+                  elevation: 6,
+                  icon: Badge(
+                    isLabelVisible: _hayMensajeNuevo,
+                    backgroundColor: Colors.red,
+                    child: const Icon(Icons.chat_bubble_outline),
+                  ),
+                  label: const Text("Chat Motorista",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: _abrirVentanaDeChat,
+                ),
+              ],
+            ),
           ),
+
+          if (_cargando)
+            const Center(
+              child: CircularProgressIndicator(color: Color(0xFF0055A4)),
+            ),
         ],
       ),
     );

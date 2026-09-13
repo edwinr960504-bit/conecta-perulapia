@@ -1,6 +1,6 @@
 # =====================================================================
-# ARCHIVO COMPLETO: tuberias_logistica.py (BLINDADO - SEPARACIÓN TOTAL)
-# PROPÓSITO: Bolsa de trabajo de Motoristas, GPS y Códigos PIN de entrega
+# ARCHIVO COMPLETO: tuberias_logistica.py (CON CRUCE DE CHAT INTELIGENTE)
+# PROPÓSITO: Bolsa de trabajo de Motoristas, GPS, Cierre de Chats y Avisos
 # =====================================================================
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -24,6 +24,10 @@ class ActualizarGPS(BaseModel):
     id_pedido: int
     latitud: float
     longitud: float
+
+class NotificarLlegada(BaseModel):
+    id_pedido: int
+    destino: str  # 'local' o 'cliente'
 
 @router.get("/pedidos_disponibles")
 @router.get("/api/pedidos_disponibles")
@@ -52,7 +56,7 @@ def repartidor_toma_pedido(req: TomarPedido):
         return {"status": "error", "mensaje": "Falla de identidad. Reinicia tu app."}
         
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
-    # 🔥 CANDADO ATÓMICO: Asigna el pedido única y exclusivamente si estaba en cero. Si Carlos y Rafa tocan al mismo tiempo, solo entra uno.
+    # 🔥 CANDADO ATÓMICO: Asigna el pedido única y exclusivamente si estaba en cero.
     cursor.execute("""
         UPDATE pedidos SET estado = 'asignado', id_repartidor = ? 
         WHERE id_pedido = ? AND (id_repartidor IS NULL OR id_repartidor = 0)
@@ -66,6 +70,27 @@ def repartidor_toma_pedido(req: TomarPedido):
         
     conexion.commit(); conexion.close()
     return {"status": "ok", "mensaje": "¡Viaje asignado y bloqueado para ti! Ve al restaurante de forma permanente."}
+
+# 🔥 NUEVO: BOTÓN "YA LLEGUÉ"
+@router.post("/api/repartidor/notificar_llegada")
+def notificar_llegada(req: NotificarLlegada):
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
+    
+    canal = 'motorista_comercio' if req.destino == 'local' else 'motorista_consumidor'
+    mensaje = "🚨 ¡EL MOTORISTA YA ESTÁ EN EL LOCAL ESPERANDO!" if req.destino == 'local' else "🚨 ¡EL MOTORISTA YA ESTÁ EN TU PUERTA!"
+    
+    try:
+        cursor.execute("""
+            INSERT INTO mensajes_chat (id_pedido, remitente, mensaje, canal)
+            VALUES (?, 'Sistema Automático', ?, ?)
+        """, (req.id_pedido, mensaje, canal))
+        conexion.commit()
+    except Exception:
+        pass
+        
+    conexion.close()
+    return {"status": "ok", "mensaje": "Aviso de llegada disparado con éxito."}
 
 @router.post("/recoger_pedido")
 @router.post("/api/recoger_pedido")
@@ -91,6 +116,15 @@ async def recoger_en_local(request: Request):
         conexion.close()
         return {"status": "error", "mensaje": "Pedido no encontrado para recolección."}
 
+    # 🔥 CRUCE DE CHAT INTELIGENTE: Le avisa al cliente en su canal que ya van en camino
+    try:
+        cursor.execute("""
+            INSERT INTO mensajes_chat (id_pedido, remitente, mensaje, canal)
+            VALUES (?, 'Sistema Automático', '🛵 ¡El motorista ha recogido tu orden y va en camino!', 'motorista_consumidor')
+        """, (id_orden,))
+    except Exception:
+        pass
+
     conexion.commit()
     conexion.close()
     return {"status": "ok", "mensaje": "¡PIN Correcto! El pedido va en camino al cliente guardado en disco."}
@@ -115,6 +149,12 @@ def entregar_a_cliente(req: ValidarPin):
         conexion.rollback()
         conexion.close()
         return {"status": "error", "mensaje": "No se pudo registrar la entrega del pedido."}
+
+    # 🔥 DESTRUCCIÓN DE VENTANA: Borra el historial de chat para cerrar la comunicación
+    try:
+        cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (req.id_pedido,))
+    except Exception:
+        pass
 
     conexion.commit(); conexion.close()
     return {"status": "ok", "mensaje": "¡Entrega completada! Dinero sumado a tu billetera personal de forma permanente."}

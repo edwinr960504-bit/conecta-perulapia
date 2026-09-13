@@ -1,5 +1,5 @@
 # ========================================================
-# ARCHIVO: adm_soporte.py (VERSIÓN DEFINITIVA Y BLINDADA)
+# ARCHIVO: adm_soporte.py (VERSIÓN DEFINITIVA Y BLINDADA - CHAT DINÁMICO)
 # PROPÓSITO: Chat en vivo, Tickets de Soporte, Alertas y Publicidad
 # ========================================================
 from fastapi import APIRouter, UploadFile, File
@@ -73,34 +73,48 @@ class TicketSoporte(BaseModel):
     evidencia: str = ""
 
 # ========================================================
-# 1. TUBERÍAS DEL CHAT Y MENSAJERÍA
+# 1. TUBERÍAS DEL CHAT Y MENSAJERÍA (CON CANALES DINÁMICOS)
 # ========================================================
 @router.post("/api/chat/enviar_mensaje")
 def enviar_mensaje(req: MensajeChat):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
+    # 🔥 LÓGICA DINÁMICA: Determina si el chat es con el local o con el cliente
+    canal_final = req.canal
+    cursor.execute("SELECT estado FROM pedidos WHERE id_pedido = ?", (req.id_pedido,))
+    estado_pedido = cursor.fetchone()
+    
+    if estado_pedido and req.canal not in ['admin_cliente']: 
+        estado = estado_pedido[0]
+        if estado == 'asignado':
+            canal_final = 'motorista_comercio'
+        elif estado in ['en_camino', 'entregado']:
+            canal_final = 'motorista_consumidor'
+
     cursor.execute("""
         INSERT INTO mensajes_chat (id_pedido, remitente, mensaje, evidencia, canal) 
         VALUES (?, ?, ?, ?, ?)
-    """, (req.id_pedido, req.remitente, req.mensaje, req.evidencia, req.canal))
+    """, (req.id_pedido, req.remitente, req.mensaje, req.evidencia, canal_final))
     
-    cursor.execute("SELECT id_soporte FROM soporte WHERE id_pedido = ?", (req.id_pedido,))
-    ticket = cursor.fetchone()
-    
-    if ticket:
-        cursor.execute("""
-            UPDATE soporte SET mensaje = ?, fecha = CURRENT_TIMESTAMP, estado = 'abierto' WHERE id_soporte = ?
-        """, (req.mensaje, ticket[0]))
-    else:
-        cursor.execute("""
-            INSERT INTO soporte (id_usuario, rol, id_pedido, mensaje, evidencia, estado) 
-            VALUES (1, 'cliente', ?, ?, ?, 'abierto')
-        """, (req.id_pedido, req.mensaje, req.evidencia))
+    # Solo abrimos ticket de soporte si es un chat de atención al cliente (evita que los chats del motorista lleguen al administrador)
+    if canal_final == 'admin_cliente':
+        cursor.execute("SELECT id_soporte FROM soporte WHERE id_pedido = ?", (req.id_pedido,))
+        ticket = cursor.fetchone()
+        
+        if ticket:
+            cursor.execute("""
+                UPDATE soporte SET mensaje = ?, fecha = CURRENT_TIMESTAMP, estado = 'abierto' WHERE id_soporte = ?
+            """, (req.mensaje, ticket[0]))
+        else:
+            cursor.execute("""
+                INSERT INTO soporte (id_usuario, rol, id_pedido, mensaje, evidencia, estado) 
+                VALUES (1, 'cliente', ?, ?, ?, 'abierto')
+            """, (req.id_pedido, req.mensaje, req.evidencia))
     
     conexion.commit()
     conexion.close()
-    return {"status": "ok", "mensaje": "Mensaje enviado y caso actualizado de forma permanente"}
+    return {"status": "ok", "canal": canal_final, "mensaje": "Mensaje enviado exitosamente"}
 
 @router.post("/api/enviar_soporte")
 def enviar_soporte(req: TicketSoporte):
@@ -122,18 +136,40 @@ def enviar_soporte(req: TicketSoporte):
     return {"status": "ok", "mensaje": "Ticket abierto exitosamente en disco."}
 
 @router.get("/api/chat/historial/{id_pedido}")
-def obtener_historial_chat(id_pedido: int):
+def obtener_historial_chat(id_pedido: int, canal: str = None):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("UPDATE mensajes_chat SET leido = 1 WHERE id_pedido = ? AND remitente != 'Admin Central'", (id_pedido,))
+    
+    # 🔥 AUTO-FILTRO: Si no nos dicen qué canal quieren, detectamos con quién debería estar hablando
+    canal_activo = canal
+    if not canal_activo:
+        cursor.execute("SELECT estado FROM pedidos WHERE id_pedido = ?", (id_pedido,))
+        row = cursor.fetchone()
+        estado = row[0] if row else 'asignado'
+        if estado == 'asignado':
+            canal_activo = 'motorista_comercio'
+        elif estado in ['en_camino', 'entregado']:
+            canal_activo = 'motorista_consumidor'
+        else:
+            canal_activo = 'admin_cliente'
+
+    cursor.execute("""
+        UPDATE mensajes_chat SET leido = 1 
+        WHERE id_pedido = ? AND canal = ? AND remitente != 'Admin Central'
+    """, (id_pedido, canal_activo))
     conexion.commit()
     
-    cursor.execute("SELECT id_mensaje, remitente, mensaje, evidencia, fecha, canal FROM mensajes_chat WHERE id_pedido = ? ORDER BY id_mensaje ASC", (id_pedido,))
+    cursor.execute("""
+        SELECT id_mensaje, remitente, mensaje, evidencia, fecha, canal 
+        FROM mensajes_chat 
+        WHERE id_pedido = ? AND canal = ? 
+        ORDER BY id_mensaje ASC
+    """, (id_pedido, canal_activo))
     filas = cursor.fetchall()
     
     mensajes = [{"id_mensaje": m[0], "remitente": m[1], "mensaje": m[2], "evidencia": m[3], "fecha": m[4], "canal": m[5]} for m in filas]
     conexion.close()
-    return {"status": "ok", "mensajes": mensajes}
+    return {"status": "ok", "canal_activo": canal_activo, "mensajes": mensajes}
 
 @router.delete("/api/chat/borrar_mensaje/{id_mensaje}")
 def borrar_un_mensaje(id_mensaje: int):
@@ -167,8 +203,8 @@ def ver_quejas_admin():
             COALESCE(p.codigo_rastreo, 'CP-0000'), COALESCE(u_cliente.nombre, 'Cliente Desconocido'),
             COALESCE(c_local.nombre_local, 'Sin Comercio'), COALESCE(u_motorista.nombre, 'Sin Motorista'),
             COALESCE(u_cliente.telefono, c_local.telefono, u_motorista.telefono, '7777-7777') as telefono,
-            (SELECT COUNT(*) FROM mensajes_chat m WHERE m.id_pedido = s.id_pedido AND m.leido = 0 AND m.remitente != 'Admin Central') as mensajes_nuevos,
-            (SELECT MAX(fecha) FROM mensajes_chat m WHERE m.id_pedido = s.id_pedido) as ultima_actividad
+            (SELECT COUNT(*) FROM mensajes_chat m WHERE m.id_pedido = s.id_pedido AND m.canal = 'admin_cliente' AND m.leido = 0 AND m.remitente != 'Admin Central') as mensajes_nuevos,
+            (SELECT MAX(fecha) FROM mensajes_chat m WHERE m.id_pedido = s.id_pedido AND m.canal = 'admin_cliente') as ultima_actividad
         FROM soporte s
         LEFT JOIN pedidos p ON s.id_pedido = p.id_pedido
         LEFT JOIN usuarios u_cliente ON p.id_cliente = u_cliente.id_usuario
@@ -237,7 +273,7 @@ def alertas_dashboard():
             SELECT COUNT(DISTINCT m.id_pedido) 
             FROM mensajes_chat m
             JOIN soporte s ON m.id_pedido = s.id_pedido
-            WHERE m.leido = 0 AND m.remitente != 'Admin Central' AND s.estado = 'abierto'
+            WHERE m.leido = 0 AND m.remitente != 'Admin Central' AND s.estado = 'abierto' AND m.canal = 'admin_cliente'
         """)
         tickets_abiertos = cursor.fetchone()[0]
         
@@ -263,7 +299,7 @@ def notificaciones_cliente():
         SELECT COUNT(*) 
         FROM mensajes_chat m
         JOIN soporte s ON m.id_pedido = s.id_pedido
-        WHERE m.leido = 0 AND m.remitente = 'Admin Central' AND s.estado = 'abierto'
+        WHERE m.leido = 0 AND m.remitente = 'Admin Central' AND s.estado = 'abierto' AND m.canal = 'admin_cliente'
     """)
     count = cursor.fetchone()[0]
     conexion.close()
@@ -378,7 +414,7 @@ async def subir_evidencia(archivo: UploadFile = File(...)):
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
 
-    # ========================================================
+# ========================================================
 # ENDPOINT PARA EXTRAER EL CÓDIGO DE RASTREO REAL EN EL CHAT
 # ========================================================
 @router.get("/api/chat/codigo_por_pedido/{id_pedido}")

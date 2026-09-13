@@ -1,6 +1,6 @@
 // Archivo: cli_rastreo.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 🔥 IMPORTANTE PARA USAR EL PORTAPAPELES
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'red.dart';
 import 'mapa_consumidor.dart';
+import 'chat_pedido.dart';
 
 // ========================================================
 // BOTÓN ANIMADO (PARPADEANTE) PARA EL CLIENTE
@@ -52,10 +53,10 @@ class _BotonMapaParpadeanteState extends State<BotonMapaParpadeante>
             borderRadius: BorderRadius.circular(8),
           ),
         ),
-        icon: const Icon(Icons.map),
+        icon: const Icon(Icons.map, size: 20),
         label: const Text(
-          "VER MAPA EN VIVO",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          "VER MAPA",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         ),
         onPressed: widget.onPressed,
       ),
@@ -83,6 +84,10 @@ class _CliRastreoState extends State<CliRastreo> {
   Timer? _timerMonitoreoPedidos;
 
   LatLng? _miUbicacionReal;
+
+  // 🔥 Variables para rastrear notificaciones rojas por cada pedido activo
+  final Map<int, int> _cantidadMensajesAnterior = {};
+  final Map<int, bool> _hayMensajeNuevo = {};
 
   @override
   void initState() {
@@ -179,10 +184,53 @@ class _CliRastreoState extends State<CliRastreo> {
             _cargando = false;
           });
         }
+
+        // 🔥 Llama al revisor de mensajes para encender los focos rojos si aplica
+        _verificarMensajesNuevos(listaOrdenada);
       }
     } catch (e) {
       debugPrint("Error rastreo: $e");
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  // 🔥 NUEVA FUNCIÓN: Revisa mensajes en segundo plano
+  Future<void> _verificarMensajesNuevos(List pedidos) async {
+    for (var p in pedidos) {
+      final estadoCodigo = p['estado_codigo'] ?? '';
+      final bool enCamino =
+          (p['en_camino'] == true || estadoCodigo == 'en_camino');
+      final int idPedido = p['id_pedido'];
+
+      // Solo gastamos recursos buscando mensajes si el motorista ya va en camino
+      if (enCamino) {
+        try {
+          final url = Uri.parse(
+              '$urlCentral/api/chat/historial/$idPedido?canal=motorista_consumidor');
+          final res = await http.get(url).timeout(const Duration(seconds: 2));
+
+          if (res.statusCode == 200) {
+            final data = json.decode(utf8.decode(res.bodyBytes));
+            List mensajes = data['mensajes'] ?? [];
+
+            int cantidadAnterior = _cantidadMensajesAnterior[idPedido] ?? 0;
+
+            if (mensajes.length > cantidadAnterior) {
+              final ultimoMsj = mensajes.last;
+              // Encendemos el punto rojo solo si el mensaje no es nuestro ni del sistema
+              if (ultimoMsj['remitente'] != 'Cliente' &&
+                  ultimoMsj['remitente'] != 'Sistema Automático') {
+                if (mounted) {
+                  setState(() {
+                    _hayMensajeNuevo[idPedido] = true;
+                  });
+                }
+              }
+              _cantidadMensajesAnterior[idPedido] = mensajes.length;
+            }
+          }
+        } catch (_) {}
+      }
     }
   }
 
@@ -223,25 +271,21 @@ class _CliRastreoState extends State<CliRastreo> {
           _latidosClienteTimer = null;
           _cargarPedidosSilencioso();
         }
-      } catch (e) {
-        debugPrint("Error al cancelar: $e");
-      }
+        // ignore: empty_catches
+      } catch (e) {}
     }
   }
 
-  // VENTANA EMERGENTE PARA VER FOTOS Y DETALLES EN GRANDE
   void _mostrarDetalleCompra(
       BuildContext context, List<dynamic> fotos, String descripcion) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          "Detalle del Pedido",
-          style:
-              TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0055A4)),
-          textAlign: TextAlign.center,
-        ),
+        title: const Text("Detalle del Pedido",
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: Color(0xFF0055A4)),
+            textAlign: TextAlign.center),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -258,10 +302,9 @@ class _CliRastreoState extends State<CliRastreo> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.grey.shade300),
                 ),
-                child: Text(
-                  descripcion,
-                  style: const TextStyle(fontSize: 15, color: Colors.black87),
-                ),
+                child: Text(descripcion,
+                    style:
+                        const TextStyle(fontSize: 15, color: Colors.black87)),
               ),
               if (fotos.isNotEmpty) ...[
                 const SizedBox(height: 20),
@@ -288,12 +331,11 @@ class _CliRastreoState extends State<CliRastreo> {
                           height: 110,
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(
-                            width: 110,
-                            height: 110,
-                            color: Colors.grey.shade200,
-                            child: const Icon(Icons.fastfood,
-                                color: Colors.grey, size: 30),
-                          ),
+                              width: 110,
+                              height: 110,
+                              color: Colors.grey.shade200,
+                              child: const Icon(Icons.fastfood,
+                                  color: Colors.grey, size: 30)),
                         ),
                       );
                     }).toList(),
@@ -326,10 +368,9 @@ class _CliRastreoState extends State<CliRastreo> {
       return GestureDetector(
         onTap: () => _mostrarDetalleCompra(context, [], descripcion),
         child: const CircleAvatar(
-          radius: 26,
-          backgroundColor: Color(0xFF0055A4),
-          child: Icon(Icons.receipt_long, color: Colors.white, size: 24),
-        ),
+            radius: 26,
+            backgroundColor: Color(0xFF0055A4),
+            child: Icon(Icons.receipt_long, color: Colors.white, size: 24)),
       );
     }
 
@@ -366,10 +407,9 @@ class _CliRastreoState extends State<CliRastreo> {
                       fit: BoxFit.cover,
                       errorBuilder: (_, error, ___) {
                         return Container(
-                          color: Colors.grey.shade300,
-                          child: const Icon(Icons.fastfood,
-                              size: 16, color: Colors.grey),
-                        );
+                            color: Colors.grey.shade300,
+                            child: const Icon(Icons.fastfood,
+                                size: 16, color: Colors.grey));
                       },
                     ),
                   ),
@@ -423,9 +463,9 @@ class _CliRastreoState extends State<CliRastreo> {
                     itemBuilder: (context, index) {
                       final p = _listaPedidos[index];
                       final estadoCodigo = p['estado_codigo'] ?? '';
+                      final int idPedido = p['id_pedido'] ?? 0;
 
-                      final int numCompra =
-                          p['numero_orden'] ?? p['id_pedido'] ?? 0;
+                      final int numCompra = p['numero_orden'] ?? idPedido;
                       final bool enCamino = (p['en_camino'] == true ||
                           estadoCodigo == 'en_camino');
 
@@ -478,14 +518,10 @@ class _CliRastreoState extends State<CliRastreo> {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          Text(
-                                            "Mi Compra del Día #$numCompra",
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 18),
-                                          ),
-
-                                          // SERIAL CON ALERTA DE CONFIRMACIÓN AL TOCAR
+                                          Text("Mi Compra del Día #$numCompra",
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 18)),
                                           GestureDetector(
                                             onTap: () {
                                               showDialog(
@@ -497,11 +533,10 @@ class _CliRastreoState extends State<CliRastreo> {
                                                       "¿Deseas copiar el código $codigoRastreoTexto al portapapeles para usarlo en soporte?"),
                                                   actions: [
                                                     TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(ctx),
-                                                      child: const Text(
-                                                          "Cancelar"),
-                                                    ),
+                                                        onPressed: () =>
+                                                            Navigator.pop(ctx),
+                                                        child: const Text(
+                                                            "Cancelar")),
                                                     ElevatedButton(
                                                       style: ElevatedButton
                                                           .styleFrom(
@@ -516,17 +551,16 @@ class _CliRastreoState extends State<CliRastreo> {
                                                         Navigator.pop(ctx);
                                                         ScaffoldMessenger.of(
                                                                 context)
-                                                            .showSnackBar(
-                                                          SnackBar(
-                                                            content: Text(
-                                                                "¡Código $codigoRastreoTexto copiado con éxito!"),
-                                                            backgroundColor:
-                                                                Colors.green,
-                                                            duration:
-                                                                const Duration(
-                                                                    seconds: 2),
-                                                          ),
-                                                        );
+                                                            .showSnackBar(SnackBar(
+                                                                content: Text(
+                                                                    "¡Código $codigoRastreoTexto copiado con éxito!"),
+                                                                backgroundColor:
+                                                                    Colors
+                                                                        .green,
+                                                                duration:
+                                                                    const Duration(
+                                                                        seconds:
+                                                                            2)));
                                                       },
                                                       child: const Text(
                                                           "Copiar Código",
@@ -541,13 +575,13 @@ class _CliRastreoState extends State<CliRastreo> {
                                             child: Row(
                                               children: [
                                                 Text(
-                                                  "Serial: $codigoRastreoTexto",
-                                                  style: const TextStyle(
-                                                      fontSize: 14,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Color(0xFF0055A4)),
-                                                ),
+                                                    "Serial: $codigoRastreoTexto",
+                                                    style: const TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color:
+                                                            Color(0xFF0055A4))),
                                                 const SizedBox(width: 4),
                                                 const Icon(Icons.copy_rounded,
                                                     size: 14,
@@ -555,13 +589,10 @@ class _CliRastreoState extends State<CliRastreo> {
                                               ],
                                             ),
                                           ),
-
-                                          Text(
-                                            "${p['fecha'] ?? 'Hoy'}",
-                                            style: const TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.grey),
-                                          ),
+                                          Text("${p['fecha'] ?? 'Hoy'}",
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey)),
                                         ],
                                       ),
                                     ],
@@ -574,14 +605,12 @@ class _CliRastreoState extends State<CliRastreo> {
                                               fontSize: 10,
                                               color: Colors.grey,
                                               fontWeight: FontWeight.bold)),
-                                      Text(
-                                        "${p['pin_seguridad'] ?? '---'}",
-                                        style: const TextStyle(
-                                            fontSize: 20,
-                                            color: Colors.red,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 2),
-                                      ),
+                                      Text("${p['pin_seguridad'] ?? '---'}",
+                                          style: const TextStyle(
+                                              fontSize: 20,
+                                              color: Colors.red,
+                                              fontWeight: FontWeight.bold,
+                                              letterSpacing: 2)),
                                     ],
                                   ),
                                 ],
@@ -596,33 +625,87 @@ class _CliRastreoState extends State<CliRastreo> {
                                   border:
                                       Border.all(color: Colors.blue.shade200),
                                 ),
-                                child: Text(
-                                  "${p['estado']}$textoLlegadaExtra",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF0055A4),
-                                      fontSize: 14),
-                                ),
+                                child: Text("${p['estado']}$textoLlegadaExtra",
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF0055A4),
+                                        fontSize: 14)),
                               ),
                               const SizedBox(height: 12),
                               if (enCamino)
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
-                                  child: BotonMapaParpadeante(
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              MapaConsumidorScreen(
-                                            idPedido: p['id_pedido'],
-                                            codigoRastreo:
-                                                p['codigo_rastreo'] ??
-                                                    'CP-0000',
-                                          ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: BotonMapaParpadeante(
+                                          onPressed: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) =>
+                                                    MapaConsumidorScreen(
+                                                  idPedido: idPedido,
+                                                  codigoRastreo:
+                                                      p['codigo_rastreo'] ??
+                                                          'CP-0000',
+                                                ),
+                                              ),
+                                            );
+                                          },
                                         ),
-                                      );
-                                    },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor:
+                                                Colors.blueAccent.shade700,
+                                            foregroundColor: Colors.white,
+                                            minimumSize:
+                                                const Size(double.infinity, 45),
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8)),
+                                          ),
+                                          // 🔥 AQUÍ SE IMPLEMENTA EL BADGE (PUNTO ROJO)
+                                          icon: Badge(
+                                            isLabelVisible:
+                                                _hayMensajeNuevo[idPedido] ??
+                                                    false,
+                                            backgroundColor: Colors.red,
+                                            child: const Icon(
+                                                Icons.chat_bubble_outline,
+                                                size: 20),
+                                          ),
+                                          label: const Text("CHAT MOTORISTA",
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13)),
+                                          onPressed: () {
+                                            // Apagamos la luz roja al entrar al chat
+                                            setState(() {
+                                              _hayMensajeNuevo[idPedido] =
+                                                  false;
+                                            });
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) =>
+                                                    ChatPedidoScreen(
+                                                  idPedido: idPedido,
+                                                  remitente: "Cliente",
+                                                  canal: "motorista_consumidor",
+                                                  nombreDestino:
+                                                      "Chat con Motorista",
+                                                ),
+                                              ),
+                                            ).then((_) =>
+                                                _cargarPedidosSilencioso());
+                                          },
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               Row(
@@ -637,7 +720,7 @@ class _CliRastreoState extends State<CliRastreo> {
                                   if (estadoCodigo == 'pendiente')
                                     IconButton(
                                       onPressed: () =>
-                                          _cancelarPedido(p['id_pedido']),
+                                          _cancelarPedido(idPedido),
                                       icon: const Icon(Icons.delete_outline,
                                           color: Colors.red, size: 26),
                                       tooltip: "Eliminar pedido",

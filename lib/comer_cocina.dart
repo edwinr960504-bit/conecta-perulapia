@@ -7,32 +7,25 @@ import 'dart:async';
 import 'pedido_service.dart';
 import 'logistica_service.dart';
 import 'red.dart';
-import 'mapa_comerciante.dart';
+import 'mapa_comerciante.dart'; // Extrae la memoria global
+import 'chat_pedido.dart';
 
-// ========================================================
-// BOTÓN ANIMADO (PARPADEANTE) PARA EL COMERCIO
-// ========================================================
-class BotonRepartidorEnCamino extends StatefulWidget {
+class BotonRepartidorEnCaminoCompacto extends StatefulWidget {
   final VoidCallback onPressed;
-  const BotonRepartidorEnCamino({super.key, required this.onPressed});
+  const BotonRepartidorEnCaminoCompacto({super.key, required this.onPressed});
 
   @override
-  State<BotonRepartidorEnCamino> createState() =>
-      _BotonRepartidorEnCaminoState();
+  State<BotonRepartidorEnCaminoCompacto> createState() =>
+      _BotonRepartidorEnCaminoCompactoState();
 }
 
-class _BotonRepartidorEnCaminoState extends State<BotonRepartidorEnCamino>
+class _BotonRepartidorEnCaminoCompactoState
+    extends State<BotonRepartidorEnCaminoCompacto>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..repeat(reverse: true);
-  }
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 800),
+  )..repeat(reverse: true);
 
   @override
   void dispose() {
@@ -44,33 +37,27 @@ class _BotonRepartidorEnCaminoState extends State<BotonRepartidorEnCamino>
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _controller,
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange.shade800,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-              side: const BorderSide(color: Colors.orangeAccent, width: 2),
-            ),
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.orange.shade800,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Colors.orangeAccent, width: 2),
           ),
-          icon: const Icon(Icons.map_rounded),
-          label: const Text(
-            "REPARTIDOR EN CAMINO",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          onPressed: widget.onPressed,
         ),
+        icon: const Icon(Icons.map_rounded, size: 18),
+        label: const Text(
+          "En Camino",
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+        ),
+        onPressed: widget.onPressed,
       ),
     );
   }
 }
 
-// ========================================================
-// VISTA COCINA
-// ========================================================
 class VistaCocina extends StatefulWidget {
   final String idComercio;
   final bool localAbierto;
@@ -87,15 +74,29 @@ class VistaCocina extends StatefulWidget {
   State<VistaCocina> createState() => _VistaCocinaState();
 }
 
-class _VistaCocinaState extends State<VistaCocina> {
+class _VistaCocinaState extends State<VistaCocina>
+    with TickerProviderStateMixin {
   final PedidoService _pedidoService = PedidoService();
   List<dynamic> _pedidos = [];
   bool _cargando = true;
   Timer? _latido;
 
+  // Estado de alerta visual
+  final Map<int, bool> _hayMensajesNuevos = {};
+
+  late final AnimationController _blinkController;
+
   @override
   void initState() {
     super.initState();
+
+    _blinkController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+      lowerBound: 0.3,
+      upperBound: 1.0,
+    )..repeat(reverse: true);
+
     _cargarPedidosReales();
     _latido = Timer.periodic(
       const Duration(seconds: 4),
@@ -105,6 +106,7 @@ class _VistaCocinaState extends State<VistaCocina> {
 
   @override
   void dispose() {
+    _blinkController.dispose();
     _latido?.cancel();
     super.dispose();
   }
@@ -117,11 +119,111 @@ class _VistaCocinaState extends State<VistaCocina> {
           _pedidos = pedidos;
           _cargando = false;
         });
+
+        _verificarNotificacionesChat(pedidos);
       }
     } catch (e) {
       debugPrint("Error al cargar pedidos: $e");
       if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  Future<void> _verificarNotificacionesChat(List<dynamic> pedidos) async {
+    for (var p in pedidos) {
+      final int idPed = p['id_pedido'] ?? p['id'] ?? 0;
+      final bool motoristaAsignado = p['id_repartidor'] != null ||
+          p['repartidor_id'] != null ||
+          p['estado'] == 'asignado' ||
+          p['estado'] == 'en_camino';
+
+      if (idPed > 0 && motoristaAsignado) {
+        try {
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final url = Uri.parse(
+              '$urlCentral/api/chat/historial/$idPed?canal=motorista_comercio&t=$timestamp');
+
+          final res = await http.get(url).timeout(const Duration(seconds: 2));
+          if (res.statusCode == 200) {
+            final data = json.decode(utf8.decode(res.bodyBytes));
+            List mensajes = data['mensajes'] ?? [];
+            int totalActual = mensajes.length;
+
+            if (!globalMensajesConocidos.containsKey(idPed)) {
+              globalMensajesConocidos[idPed] = totalActual;
+              _hayMensajesNuevos[idPed] = false;
+            } else {
+              int conocidos = globalMensajesConocidos[idPed]!;
+              if (totalActual > conocidos) {
+                int motoristaNuevos = 0;
+                for (int i = conocidos; i < totalActual; i++) {
+                  final remitente =
+                      (mensajes[i]['remitente'] ?? '').toString().toLowerCase();
+                  if (!remitente.contains('comercio')) {
+                    motoristaNuevos++;
+                  }
+                }
+
+                if (motoristaNuevos > 0 && mounted) {
+                  setState(() {
+                    _hayMensajesNuevos[idPed] = true;
+                  });
+                } else {
+                  globalMensajesConocidos[idPed] = totalActual;
+                }
+              } else if (totalActual == conocidos &&
+                  _hayMensajesNuevos[idPed] == true) {
+                setState(() {
+                  _hayMensajesNuevos[idPed] = false;
+                });
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // 🔥 Se llama EXCLUSIVAMENTE cuando cerramos el chat dentro de la cocina (sí leíste los mensajes)
+  Future<void> _marcarHistorialComoLeido(int idPed) async {
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final url = Uri.parse(
+          '$urlCentral/api/chat/historial/$idPed?canal=motorista_comercio&t=$timestamp');
+      final res = await http.get(url).timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        List mensajes = data['mensajes'] ?? [];
+        globalMensajesConocidos[idPed] = mensajes.length;
+        if (mounted) {
+          setState(() {
+            _hayMensajesNuevos[idPed] = false;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 🔥 Se llama cuando vuelves del mapa (verifica si leíste o no el chat allá adentro)
+  Future<void> _sincronizarEstadoDesdeGlobal(int idPed) async {
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final url = Uri.parse(
+          '$urlCentral/api/chat/historial/$idPed?canal=motorista_comercio&t=$timestamp');
+      final res = await http.get(url).timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        List mensajes = data['mensajes'] ?? [];
+        int totalActual = mensajes.length;
+        int conocidos = globalMensajesConocidos[idPed] ?? totalActual;
+
+        if (mounted) {
+          setState(() {
+            // Si el total de mensajes sigue siendo mayor a los conocidos globalmente, sigue la alerta
+            _hayMensajesNuevos[idPed] = totalActual > conocidos;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _aceptarPedido(int idPedido) async {
@@ -143,7 +245,6 @@ class _VistaCocinaState extends State<VistaCocina> {
     }
   }
 
-  // 🔥 DIÁLOGO DE ENTREGA BLINDADO CON CONFIRMACIÓN PERMANENTE
   void _mostrarDialogoEntrega(int idPed) {
     final pinCtrl = TextEditingController();
     showDialog(
@@ -333,6 +434,9 @@ class _VistaCocinaState extends State<VistaCocina> {
                                   p['estado'] == 'asignado' ||
                                   p['estado'] == 'en_camino';
 
+                          final bool hayAlerta =
+                              _hayMensajesNuevos[idPed] ?? false;
+
                           return Card(
                             elevation: esPendiente ? 4 : 1,
                             margin: const EdgeInsets.only(bottom: 12),
@@ -443,24 +547,114 @@ class _VistaCocinaState extends State<VistaCocina> {
                                     Column(
                                       children: [
                                         if (motoristaAsignado) ...[
-                                          BotonRepartidorEnCamino(
-                                            onPressed: () async {
-                                              final entregar =
-                                                  await Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (context) =>
-                                                      MapaComercianteScreen(
-                                                    idPedido: idPed,
-                                                    numeroOrden:
-                                                        "${p['numero_orden'] ?? idPed}",
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child:
+                                                    BotonRepartidorEnCaminoCompacto(
+                                                  onPressed: () async {
+                                                    // 🔥 Ya no apagamos la alerta aquí, el usuario debe leer el chat
+                                                    final entregar =
+                                                        await Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                        builder: (context) =>
+                                                            MapaComercianteScreen(
+                                                          idPedido: idPed,
+                                                          numeroOrden:
+                                                              "${p['numero_orden'] ?? idPed}",
+                                                        ),
+                                                      ),
+                                                    );
+
+                                                    // Al volver del mapa, verifica de forma segura si leyó el chat allá o no
+                                                    await _sincronizarEstadoDesdeGlobal(
+                                                        idPed);
+
+                                                    if (entregar == true) {
+                                                      _mostrarDialogoEntrega(
+                                                          idPed);
+                                                    }
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: FadeTransition(
+                                                  opacity: hayAlerta
+                                                      ? _blinkController
+                                                      : const AlwaysStoppedAnimation(
+                                                          1.0),
+                                                  child: ElevatedButton.icon(
+                                                    style: ElevatedButton
+                                                        .styleFrom(
+                                                      backgroundColor: hayAlerta
+                                                          ? Colors.red.shade700
+                                                          : Colors
+                                                              .teal.shade700,
+                                                      foregroundColor:
+                                                          Colors.white,
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          vertical: 12,
+                                                          horizontal: 8),
+                                                      shape:
+                                                          RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(8),
+                                                        side: hayAlerta
+                                                            ? const BorderSide(
+                                                                color: Colors
+                                                                    .white,
+                                                                width: 2)
+                                                            : BorderSide.none,
+                                                      ),
+                                                    ),
+                                                    icon: Icon(
+                                                        hayAlerta
+                                                            ? Icons
+                                                                .mark_chat_unread
+                                                            : Icons
+                                                                .chat_bubble_outline,
+                                                        size: 18),
+                                                    label: const Text(
+                                                      "Chat",
+                                                      style: TextStyle(
+                                                          fontSize: 13,
+                                                          fontWeight:
+                                                              FontWeight.bold),
+                                                    ),
+                                                    onPressed: () {
+                                                      // Entró directo al chat, apagamos la alerta
+                                                      setState(() {
+                                                        _hayMensajesNuevos[
+                                                            idPed] = false;
+                                                      });
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (context) =>
+                                                              ChatPedidoScreen(
+                                                            idPedido: idPed,
+                                                            remitente:
+                                                                "Comercio",
+                                                            canal:
+                                                                "motorista_comercio",
+                                                            nombreDestino:
+                                                                "Chat con Motorista",
+                                                          ),
+                                                        ),
+                                                      ).then((_) {
+                                                        // 🔥 Regresó del chat, marcamos todo como leído globalmente
+                                                        _marcarHistorialComoLeido(
+                                                            idPed);
+                                                      });
+                                                    },
                                                   ),
                                                 ),
-                                              );
-                                              if (entregar == true) {
-                                                _mostrarDialogoEntrega(idPed);
-                                              }
-                                            },
+                                              ),
+                                            ],
                                           ),
                                           const SizedBox(height: 10),
                                         ],

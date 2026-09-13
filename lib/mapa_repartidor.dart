@@ -1,3 +1,4 @@
+// Archivo: mapa_repartidor.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -8,6 +9,10 @@ import 'dart:convert';
 import 'dart:async';
 import 'red.dart';
 import 'gps_service.dart';
+import 'chat_pedido.dart';
+
+// 🔥 MEMORIA GLOBAL: Comparte el estado de lectura de mensajes con toda la app
+Map<int, int> globalMensajesConocidosRepartidor = {};
 
 class RadarMapaScreen extends StatefulWidget {
   final int idPedido;
@@ -32,18 +37,24 @@ class RadarMapaScreen extends StatefulWidget {
 }
 
 class _RadarMapaScreenState extends State<RadarMapaScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   LatLng _ubicacionMotorista = const LatLng(13.7746, -89.0244);
   late LatLng _ubicacionDestino;
 
   StreamSubscription<Position>? _streamPosicion;
   Timer? _timerRuta;
+  Timer? _timerChatNotif;
 
   String _distanciaYtiempo = "Calculando ruta...";
   List<LatLng> _rutaCalles = [];
 
+  bool _hayMensajeNuevo = false;
+
   final MapController _mapController = MapController();
+
   late AnimationController _blinkController;
+  // Controlador para el parpadeo suave del botón de chat
+  late AnimationController _chatBlinkController;
 
   @override
   void initState() {
@@ -55,15 +66,99 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
       duration: const Duration(milliseconds: 700),
     )..repeat(reverse: true);
 
+    _chatBlinkController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+      lowerBound: 0.3,
+      upperBound: 1.0,
+    );
+
     _iniciarMotorNavegacion();
+    _iniciarEscaneoChat();
   }
 
   @override
   void dispose() {
     _blinkController.dispose();
+    _chatBlinkController.dispose();
     _streamPosicion?.cancel();
     _timerRuta?.cancel();
+    _timerChatNotif?.cancel();
     super.dispose();
+  }
+
+  void _iniciarEscaneoChat() {
+    final canalActivo =
+        widget.faseRecoleccion ? "motorista_comercio" : "motorista_consumidor";
+
+    _timerChatNotif = Timer.periodic(const Duration(seconds: 3), (_) async {
+      try {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final url = Uri.parse(
+            '$urlCentral/api/chat/historial/${widget.idPedido}?canal=$canalActivo&t=$timestamp');
+        final res = await http.get(url).timeout(const Duration(seconds: 2));
+
+        if (res.statusCode == 200) {
+          final data = json.decode(utf8.decode(res.bodyBytes));
+          List mensajes = data['mensajes'] ?? [];
+          int totalActual = mensajes.length;
+
+          if (!globalMensajesConocidosRepartidor.containsKey(widget.idPedido)) {
+            globalMensajesConocidosRepartidor[widget.idPedido] = totalActual;
+            _hayMensajeNuevo = false;
+          } else {
+            int conocidos = globalMensajesConocidosRepartidor[widget.idPedido]!;
+
+            if (totalActual > conocidos) {
+              int nuevosExternos = 0;
+              for (int i = conocidos; i < totalActual; i++) {
+                if (mensajes[i]['remitente'] != 'Motorista' &&
+                    mensajes[i]['remitente'] != 'Sistema Automático') {
+                  nuevosExternos++;
+                }
+              }
+
+              if (nuevosExternos > 0 && mounted) {
+                setState(() {
+                  _hayMensajeNuevo = true;
+                });
+
+                if (!_chatBlinkController.isAnimating) {
+                  _chatBlinkController.repeat(reverse: true);
+                }
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content:
+                        Text("📩 Nuevo mensaje de ${widget.nombreDestino}"),
+                    backgroundColor: widget.faseRecoleccion
+                        ? Colors.orange.shade800
+                        : Colors.blue.shade800,
+                    duration: const Duration(seconds: 3),
+                    behavior: SnackBarBehavior.floating,
+                    margin: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).size.height * 0.82,
+                      left: 20,
+                      right: 20,
+                    ),
+                  ),
+                );
+              } else {
+                globalMensajesConocidosRepartidor[widget.idPedido] =
+                    totalActual;
+              }
+            } else if (totalActual == conocidos && _hayMensajeNuevo) {
+              // Sincronización: Si se leyó en otra pantalla, apagamos el parpadeo aquí
+              setState(() {
+                _hayMensajeNuevo = false;
+                _chatBlinkController.stop();
+                _chatBlinkController.value = 1.0;
+              });
+            }
+          }
+        }
+      } catch (_) {}
+    });
   }
 
   Future<void> _iniciarMotorNavegacion() async {
@@ -90,7 +185,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
 
     const opcionesNavegacion = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 3,
+      distanceFilter: 1,
     );
 
     _streamPosicion =
@@ -101,17 +196,27 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
         const Distance dist = Distance();
         double km =
             dist.as(LengthUnit.Meter, nuevaPos, _ubicacionDestino) / 1000;
-        int minutos = (km * 3).ceil();
+
+        int totalMinutos = (km * 3).ceil();
+        String tiempoTexto = "";
+        if (totalMinutos >= 60) {
+          int horas = totalMinutos ~/ 60;
+          int minsRestantes = totalMinutos % 60;
+          tiempoTexto =
+              "$horas h ${minsRestantes > 0 ? '$minsRestantes min' : ''}";
+        } else {
+          tiempoTexto = "$totalMinutos min";
+        }
 
         setState(() {
           _ubicacionMotorista = nuevaPos;
           _distanciaYtiempo =
-              "A ${km.toStringAsFixed(2)} km • Llegada en $minutos min";
+              "A ${km.toStringAsFixed(1)} km • Llega en $tiempoTexto";
         });
       }
     });
 
-    _timerRuta = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _timerRuta = Timer.periodic(const Duration(seconds: 3), (timer) {
       _trazarRutaWaze();
     });
   }
@@ -120,7 +225,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
     try {
       final url = Uri.parse(
           'https://router.project-osrm.org/route/v1/driving/${_ubicacionMotorista.longitude},${_ubicacionMotorista.latitude};${_ubicacionDestino.longitude},${_ubicacionDestino.latitude}?geometries=geojson&overview=full');
-      final res = await http.get(url).timeout(const Duration(seconds: 4));
+      final res = await http.get(url).timeout(const Duration(seconds: 3));
 
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
@@ -140,47 +245,100 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
     } catch (_) {}
   }
 
-  Future<void> _abrirNavegadorNativo(String tipo) async {
+  Future<void> _abrirWazeNativo() async {
     final lat = widget.latDestino;
     final lon = widget.lonDestino;
-    Uri url;
-
-    if (tipo == 'google') {
-      url = Uri.parse(
-          'https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=driving');
-    } else {
-      url = Uri.parse('https://waze.com/ul?ll=$lat,$lon&navigate=yes');
-    }
+    final Uri url = Uri.parse('https://waze.com/ul?ll=$lat,$lon&navigate=yes');
 
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
             content: Text(
-                "No se pudo abrir $tipo. Asegúrate de tener la app instalada.")),
+                "No se pudo abrir Waze. Asegúrate de tener la app instalada.")),
       );
     }
   }
 
+  void _abrirChatEnMapa() {
+    setState(() {
+      _hayMensajeNuevo = false;
+      _chatBlinkController.stop();
+      _chatBlinkController.value = 1.0;
+    });
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.65,
+          child: ChatPedidoScreen(
+            idPedido: widget.idPedido,
+            remitente: "Motorista",
+            canal: widget.faseRecoleccion
+                ? "motorista_comercio"
+                : "motorista_consumidor",
+            nombreDestino:
+                widget.faseRecoleccion ? "Chat con Local" : "Chat con Cliente",
+          ),
+        ),
+      ),
+    ).then((_) {
+      _sincronizarHistorialAlCerrar();
+    });
+  }
+
+  Future<void> _sincronizarHistorialAlCerrar() async {
+    try {
+      final canalActivo = widget.faseRecoleccion
+          ? "motorista_comercio"
+          : "motorista_consumidor";
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final url = Uri.parse(
+          '$urlCentral/api/chat/historial/${widget.idPedido}?canal=$canalActivo&t=$timestamp');
+      final res = await http.get(url).timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final data = json.decode(utf8.decode(res.bodyBytes));
+        List mensajes = data['mensajes'] ?? [];
+
+        // Sincronizamos la memoria global para que se entere toda la app
+        globalMensajesConocidosRepartidor[widget.idPedido] = mensajes.length;
+
+        if (mounted) {
+          setState(() {
+            _hayMensajeNuevo = false;
+            _chatBlinkController.stop();
+            _chatBlinkController.value = 1.0;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
   void _centrarEnMoto() {
     _mapController.move(_ubicacionMotorista, 17.5);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Centrado en tu ubicación"),
+        duration: Duration(milliseconds: 400)));
   }
 
   void _centrarEnDestino() {
     _mapController.move(_ubicacionDestino, 17.0);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            "Centrado en ${widget.faseRecoleccion ? 'el Local' : 'el Cliente'}"),
+        duration: const Duration(milliseconds: 400)));
   }
 
-  void _zoomIn() {
-    _mapController.move(
-        _mapController.camera.center, _mapController.camera.zoom + 1.0);
-  }
-
-  void _zoomOut() {
-    _mapController.move(
-        _mapController.camera.center, _mapController.camera.zoom - 1.0);
-  }
+  void _zoomIn() => _mapController.move(
+      _mapController.camera.center, _mapController.camera.zoom + 1.0);
+  void _zoomOut() => _mapController.move(
+      _mapController.camera.center, _mapController.camera.zoom - 1.0);
 
   void _mostrarDialogoEntrega(BuildContext context) {
     if (widget.faseRecoleccion) {
@@ -203,25 +361,20 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
           controller: pinCtrl,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
-            labelText: "PIN del Cliente",
-            prefixIcon: Icon(Icons.vpn_key),
-          ),
+              labelText: "PIN del Cliente", prefixIcon: Icon(Icons.vpn_key)),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancelar"),
-          ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancelar")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
             onPressed: () async {
               final pin = pinCtrl.text.trim();
               if (pin.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text("Por favor ingresa un PIN"),
-                      backgroundColor: Colors.red),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Por favor ingresa un PIN"),
+                    backgroundColor: Colors.red));
                 return;
               }
 
@@ -234,7 +387,6 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                 );
 
                 final data = json.decode(utf8.decode(res.bodyBytes));
-
                 if (!context.mounted) return;
 
                 if (data['status'] == 'ok') {
@@ -253,7 +405,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                         backgroundColor: Colors.red),
                   );
                 }
-              } catch (e) {
+              } catch (_) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                       content: Text("Error de conexión al servidor"),
@@ -275,9 +427,13 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
         ? _rutaCalles
         : [_ubicacionMotorista, _ubicacionDestino];
 
+    final Color colorTema =
+        widget.faseRecoleccion ? Colors.orange.shade800 : Colors.blue.shade800;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text("Navegación: ${widget.codigoRastreo}"),
+        title: Text("Navegación: ${widget.codigoRastreo}",
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         backgroundColor: const Color(0xFF0F766E),
         foregroundColor: Colors.white,
       ),
@@ -286,9 +442,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _ubicacionMotorista,
-              initialZoom: 17.5,
-            ),
+                initialCenter: _ubicacionMotorista, initialZoom: 17.5),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -298,9 +452,7 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                 polylines: [
                   Polyline(
                     points: puntosRutaFinal,
-                    color: widget.faseRecoleccion
-                        ? Colors.orange.shade700
-                        : Colors.blue.shade700,
+                    color: colorTema,
                     strokeWidth: 6.0,
                   ),
                 ],
@@ -309,45 +461,56 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                 markers: [
                   Marker(
                     point: _ubicacionMotorista,
-                    width: 45,
-                    height: 45,
-                    child: FadeTransition(
-                      opacity: _blinkController,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black87,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black38, blurRadius: 4)
-                          ],
+                    width: 55,
+                    height: 55,
+                    child: GestureDetector(
+                      onTap: _centrarEnMoto,
+                      child: FadeTransition(
+                        opacity: _blinkController,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.indigo.shade900,
+                            shape: BoxShape.circle,
+                            border:
+                                Border.all(color: Colors.amberAccent, width: 3),
+                            boxShadow: const [
+                              BoxShadow(
+                                  color: Colors.black54,
+                                  blurRadius: 8,
+                                  offset: Offset(0, 3))
+                            ],
+                          ),
+                          child: const Icon(Icons.navigation,
+                              color: Colors.amberAccent, size: 30),
                         ),
-                        child: const Icon(Icons.two_wheeler,
-                            color: Colors.white, size: 22),
                       ),
                     ),
                   ),
                   Marker(
                     point: _ubicacionDestino,
-                    width: 45,
-                    height: 45,
-                    child: FadeTransition(
-                      opacity: _blinkController,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: widget.faseRecoleccion
-                              ? Colors.orange.shade800
-                              : Colors.blue.shade800,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black38, blurRadius: 4)
-                          ],
+                    width: 50,
+                    height: 50,
+                    child: GestureDetector(
+                      onTap: _centrarEnDestino,
+                      child: FadeTransition(
+                        opacity: _blinkController,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: colorTema,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: const [
+                              BoxShadow(
+                                  color: Colors.black45,
+                                  blurRadius: 6,
+                                  offset: Offset(0, 2))
+                            ],
+                          ),
+                          child: Icon(
+                              widget.faseRecoleccion ? Icons.store : Icons.home,
+                              color: Colors.white,
+                              size: 24),
                         ),
-                        child: Icon(
-                            widget.faseRecoleccion ? Icons.store : Icons.home,
-                            color: Colors.white,
-                            size: 20),
                       ),
                     ),
                   ),
@@ -355,9 +518,55 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
               ),
             ],
           ),
+
+          // 📍 PÍLDORA SUPERIOR ULTRA FINA Y ELEGANTE
+          Positioned(
+            top: 16,
+            left: 20,
+            right: 20,
+            child: SafeArea(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.95),
+                  borderRadius: BorderRadius.circular(30),
+                  boxShadow: const [
+                    BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 8,
+                        offset: Offset(0, 3))
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      widget.faseRecoleccion ? Icons.store : Icons.home,
+                      color: colorTema,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Destino: ${widget.nombreDestino} • $_distanciaYtiempo",
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            color: Colors.black87),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // 🎛️ CONTROLES FLOTANTES LATERALES (Más arriba para no topar con Waze/Entregar)
           Positioned(
             right: 16,
-            bottom: 230,
+            bottom: widget.faseRecoleccion ? 110 : 175,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -365,21 +574,17 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                   heroTag: "btnZoomInRepa",
                   mini: true,
                   backgroundColor: Colors.white,
-                  foregroundColor: widget.faseRecoleccion
-                      ? Colors.orange.shade800
-                      : Colors.blue.shade800,
+                  foregroundColor: colorTema,
                   elevation: 4,
                   onPressed: _zoomIn,
                   child: const Icon(Icons.add),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 FloatingActionButton(
                   heroTag: "btnZoomOutRepa",
                   mini: true,
                   backgroundColor: Colors.white,
-                  foregroundColor: widget.faseRecoleccion
-                      ? Colors.orange.shade800
-                      : Colors.blue.shade800,
+                  foregroundColor: colorTema,
                   elevation: 4,
                   onPressed: _zoomOut,
                   child: const Icon(Icons.remove),
@@ -387,154 +592,124 @@ class _RadarMapaScreenState extends State<RadarMapaScreen>
                 const SizedBox(height: 16),
                 FloatingActionButton(
                   heroTag: "btnCentrarMotoRepa",
-                  backgroundColor: Colors.black87,
-                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.indigo.shade900,
+                  foregroundColor: Colors.amberAccent,
                   elevation: 4,
                   onPressed: _centrarEnMoto,
-                  tooltip: "Centrar en mi ubicación",
-                  child: const Icon(Icons.my_location),
+                  tooltip: "Centrar Moto",
+                  child: const Icon(Icons.navigation),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: "btnCentrarDestinoRepa",
+                  backgroundColor: Colors.white,
+                  foregroundColor: colorTema,
+                  elevation: 4,
+                  onPressed: _centrarEnDestino,
+                  tooltip: "Centrar Destino",
+                  child:
+                      Icon(widget.faseRecoleccion ? Icons.store : Icons.home),
                 ),
               ],
             ),
           ),
+
+          // 🚀 BOTONES INFERIORES FLOTANTES
           Positioned(
-            bottom: 20,
+            bottom: 24,
             left: 16,
             right: 16,
-            child: GestureDetector(
-              onTap: _centrarEnDestino,
-              child: Card(
-                elevation: 6,
-                color: widget.faseRecoleccion
-                    ? Colors.orange.shade50
-                    : Colors.blue.shade50,
-                shape: RoundedRectangleBorder(
-                  side: BorderSide(
-                      color: widget.faseRecoleccion
-                          ? Colors.orange.shade200
-                          : Colors.blue.shade200),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          FadeTransition(
-                            opacity: _blinkController,
-                            child: Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: widget.faseRecoleccion
-                                    ? Colors.orange.shade100
-                                    : Colors.blue.shade100,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(Icons.navigation,
-                                  color: widget.faseRecoleccion
-                                      ? Colors.orange.shade800
-                                      : Colors.blue.shade800,
-                                  size: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: FadeTransition(
+                        opacity: _hayMensajeNuevo
+                            ? Tween<double>(begin: 0.3, end: 1.0)
+                                .animate(_chatBlinkController)
+                            : const AlwaysStoppedAnimation(1.0),
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
+                                colorTema, // Mantiene su color base
+                            foregroundColor: Colors.white,
+                            elevation: 6,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: _hayMensajeNuevo
+                                  ? const BorderSide(
+                                      color: Colors.white, width: 2)
+                                  : BorderSide.none,
                             ),
                           ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  "Destino: ${widget.nombreDestino}",
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                      color: Colors.black87),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _distanciaYtiempo,
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: widget.faseRecoleccion
-                                          ? Colors.orange.shade800
-                                          : Colors.blue.shade800,
-                                      fontSize: 14),
-                                ),
-                              ],
-                            ),
+                          icon: Badge(
+                            isLabelVisible: _hayMensajeNuevo,
+                            backgroundColor: Colors.red,
+                            child:
+                                const Icon(Icons.chat_bubble_outline, size: 20),
                           ),
-                        ],
+                          label: Text(
+                            widget.faseRecoleccion
+                                ? "Chat Local"
+                                : "Chat Cliente",
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          onPressed: _abrirChatEnMapa,
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue.shade700,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8)),
-                              ),
-                              icon: const Icon(Icons.map, size: 18),
-                              label: const Text("Google Maps",
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold)),
-                              onPressed: () => _abrirNavegadorNativo('google'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.lightBlue.shade300,
-                                foregroundColor: Colors.black87,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8)),
-                              ),
-                              icon: const Icon(Icons.drive_eta, size: 18),
-                              label: const Text("Waze",
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold)),
-                              onPressed: () => _abrirNavegadorNativo('waze'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (!widget.faseRecoleccion) ...[
-                        const Divider(height: 24, thickness: 1),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              elevation: 2,
-                            ),
-                            icon: const Icon(Icons.check_circle,
-                                color: Colors.white, size: 22),
-                            label: const Text(
-                              "ENTREGAR AL CLIENTE",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                            onPressed: () => _mostrarDialogoEntrega(context),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.lightBlue.shade300,
+                          foregroundColor: Colors.black87,
+                          elevation: 6,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                      ],
-                    ],
-                  ),
+                        icon: const Icon(Icons.drive_eta, size: 20),
+                        label: const Text(
+                          "Waze",
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                        onPressed: _abrirWazeNativo,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
+                if (!widget.faseRecoleccion) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade700,
+                        foregroundColor: Colors.white,
+                        elevation: 6,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.check_circle, size: 20),
+                      label: const Text(
+                        "ENTREGAR AL CLIENTE",
+                        style: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: () => _mostrarDialogoEntrega(context),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
