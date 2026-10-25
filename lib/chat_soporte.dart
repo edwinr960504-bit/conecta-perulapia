@@ -95,8 +95,9 @@ class _ChatSoporteState extends State<ChatSoporte> {
 
   Future<void> _cargarHistorial({bool silencioso = false}) async {
     try {
-      final res = await http
-          .get(Uri.parse('$urlCentral/api/chat/historial/${widget.idPedido}'));
+      final res = await http.get(Uri.parse(
+          '$urlCentral/api/chat/historial/${widget.idPedido}'
+          '?canal=${Uri.encodeQueryComponent(widget.canal)}'));
       if (res.statusCode == 200 && mounted) {
         final data = json.decode(utf8.decode(res.bodyBytes));
         setState(() {
