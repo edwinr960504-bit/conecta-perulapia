@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:perulapia_connect/acceso_soporte.dart';
 import 'package:perulapia_connect/chat_soporte.dart';
 
 // ========================================================
@@ -39,7 +40,7 @@ class SoporteComercioPantalla extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 10),
               child: Text(
-                "¿Tienes problemas con tus ventas, pagos o el menú? Comunícate de inmediato con la central.",
+                "¿Tienes problemas con tus ventas, pagos o una entrega? Ingresa el código de rastreo del pedido para reportarlo.",
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
@@ -52,56 +53,14 @@ class SoporteComercioPantalla extends StatelessWidget {
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
                 onTap: () {
-                  final pedidoCtrl = TextEditingController();
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text("Soporte por Pedido"),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                              "Ingresa el ID o número del pedido con el que tienes inconvenientes:",
-                              style:
-                                  TextStyle(fontSize: 13, color: Colors.grey)),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: pedidoCtrl,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                                labelText: "Número de Pedido",
-                                border: OutlineInputBorder()),
-                          ),
-                        ],
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => AccesoSoporte(
+                        idUsuario: int.tryParse(idComercio) ?? 0,
+                        nombre: nombreComercio,
+                        rol: 'comercio',
                       ),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text("Cancelar")),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: colorTema),
-                          onPressed: () {
-                            final idPed =
-                                int.tryParse(pedidoCtrl.text.trim()) ?? 0;
-                            if (idPed > 0) {
-                              Navigator.pop(ctx);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ChatSoporte(
-                                    idPedido: idPed,
-                                    remitente: nombreComercio,
-                                    canal: "admin_comercio",
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                          child: const Text("Abrir Chat",
-                              style: TextStyle(color: Colors.white)),
-                        ),
-                      ],
                     ),
                   );
                 },
@@ -128,7 +87,7 @@ class SoporteComercioPantalla extends StatelessWidget {
                                     fontWeight: FontWeight.bold, fontSize: 16)),
                             SizedBox(height: 4),
                             Text(
-                                "Reporta incidencias con la entrega, pagos o dirección.",
+                                "Ingresa el código de rastreo para levantar reporte.",
                                 style: TextStyle(
                                     color: Colors.grey, fontSize: 13)),
                           ],

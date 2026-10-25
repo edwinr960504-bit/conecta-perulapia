@@ -6,13 +6,15 @@ import 'red.dart';
 import 'chat_soporte.dart';
 
 class AccesoSoporte extends StatefulWidget {
-  final int idCliente;
-  final String nombreCliente;
+  final int idUsuario;
+  final String nombre;
+  final String rol; // cliente | comercio | repartidor
 
   const AccesoSoporte({
     super.key,
-    required this.idCliente,
-    required this.nombreCliente,
+    required this.idUsuario,
+    required this.nombre,
+    this.rol = 'cliente',
   });
 
   @override
@@ -24,10 +26,38 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
   bool _cargando = true;
   bool _validando = false;
 
+  String get _canal => 'admin_${widget.rol}';
+
+  Color get _colorTema {
+    switch (widget.rol) {
+      case 'comercio':
+        return const Color(0xFFD97706);
+      case 'repartidor':
+        return const Color(0xFF0F766E);
+      default:
+        return const Color(0xFF0055A4);
+    }
+  }
+
+  String get _descripcionCodigo {
+    switch (widget.rol) {
+      case 'comercio':
+        return "del pedido de tu negocio";
+      case 'repartidor':
+        return "del pedido que atendiste";
+      default:
+        return "de tu compra";
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _buscarChatPendiente();
+    if (widget.rol == 'cliente') {
+      _buscarChatPendiente();
+    } else {
+      _cargando = false;
+    }
   }
 
   @override
@@ -39,7 +69,7 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
   Future<void> _buscarChatPendiente() async {
     try {
       final url =
-          Uri.parse('$urlCentral/api/cliente/chat_activo/${widget.idCliente}');
+          Uri.parse('$urlCentral/api/cliente/chat_activo/${widget.idUsuario}');
       // Le bajamos el tiempo de espera a 2 segundos para que si el servidor no responde, pase rápido
       final res = await http.get(url).timeout(const Duration(seconds: 2));
 
@@ -52,8 +82,8 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
             MaterialPageRoute(
               builder: (context) => ChatSoporte(
                 idPedido: data['id_pedido'],
-                remitente: widget.nombreCliente,
-                canal: "admin_cliente",
+                remitente: widget.nombre,
+                canal: _canal,
               ),
             ),
           );
@@ -70,6 +100,15 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
     }
   }
 
+  Uri _urlValidacion(String codigo) {
+    final codigoSeguro = Uri.encodeComponent(codigo);
+    if (widget.rol == 'cliente') {
+      return Uri.parse('$urlCentral/api/cliente/validar_soporte/$codigoSeguro');
+    }
+    return Uri.parse(
+        '$urlCentral/api/${widget.rol}/validar_soporte/${widget.idUsuario}/$codigoSeguro');
+  }
+
   Future<void> _validarIngreso() async {
     final codigo = _codigoCtrl.text.trim();
     if (codigo.isEmpty) {
@@ -84,8 +123,8 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
     setState(() => _validando = true);
 
     try {
-      final url = Uri.parse('$urlCentral/api/cliente/validar_soporte/$codigo');
-      final res = await http.get(url).timeout(const Duration(seconds: 5));
+      final res =
+          await http.get(_urlValidacion(codigo)).timeout(const Duration(seconds: 5));
       final data = json.decode(utf8.decode(res.bodyBytes));
 
       if (mounted) setState(() => _validando = false);
@@ -97,8 +136,8 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
           MaterialPageRoute(
             builder: (context) => ChatSoporte(
               idPedido: data['id_pedido'],
-              remitente: widget.nombreCliente,
-              canal: "admin_cliente",
+              remitente: widget.nombre,
+              canal: _canal,
             ),
           ),
         );
@@ -106,7 +145,9 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(data['mensaje'] ?? "Código inválido."),
+            content: Text(
+                (data['mensaje'] ?? data['detail'] ?? "Código inválido.")
+                    .toString()),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 4),
           ),
@@ -124,15 +165,16 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
 
   @override
   Widget build(BuildContext context) {
+    final colorTema = _colorTema;
     if (_cargando) {
-      return const Scaffold(
+      return Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(color: Color(0xFF0055A4)),
-              SizedBox(height: 16),
-              Text("Buscando casos pendientes...",
+              CircularProgressIndicator(color: colorTema),
+              const SizedBox(height: 16),
+              const Text("Buscando casos pendientes...",
                   style: TextStyle(color: Colors.grey)),
             ],
           ),
@@ -143,7 +185,7 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Soporte de Pedidos"),
-        backgroundColor: const Color(0xFF0055A4),
+        backgroundColor: colorTema,
         foregroundColor: Colors.white,
       ),
       body: Padding(
@@ -152,22 +194,19 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.support_agent_rounded,
-                size: 80, color: Color(0xFF0055A4)),
+            Icon(Icons.support_agent_rounded, size: 80, color: colorTema),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               "¿Tienes algún inconveniente?",
               textAlign: TextAlign.center,
               style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF0055A4)),
+                  fontSize: 22, fontWeight: FontWeight.bold, color: colorTema),
             ),
             const SizedBox(height: 10),
-            const Text(
-              "Ingresa el código de rastreo (Ej. CP-12345) de tu compra. Recuerda que tienes un máximo de 3 horas después de finalizado para levantar un reporte.",
+            Text(
+              "Ingresa el código de rastreo (Ej. CP-12345) $_descripcionCodigo. Recuerda que tienes un máximo de 3 horas después de finalizado para levantar un reporte.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 14),
+              style: const TextStyle(color: Colors.grey, fontSize: 14),
             ),
             const SizedBox(height: 30),
             TextField(
@@ -180,13 +219,13 @@ class _AccesoSoporteState extends State<AccesoSoporte> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 filled: true,
-                fillColor: Colors.blue.shade50,
+                fillColor: colorTema.withValues(alpha: 0.08),
               ),
             ),
             const SizedBox(height: 20),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0055A4),
+                backgroundColor: colorTema,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(

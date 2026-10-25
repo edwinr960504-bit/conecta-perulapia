@@ -110,7 +110,7 @@ def enviar_mensaje(req: MensajeChat, request: Request):
     cursor.execute("SELECT estado FROM pedidos WHERE id_pedido = ?", (req.id_pedido,))
     estado_pedido = cursor.fetchone()
     
-    if estado_pedido and req.canal not in ['admin_cliente']: 
+    if estado_pedido and not req.canal.startswith('admin_'): 
         estado = estado_pedido[0]
         if estado == 'asignado':
             canal_final = 'motorista_comercio'
@@ -354,6 +354,22 @@ def notificaciones_cliente(request: Request):
 @router.get("/api/cliente/validar_soporte/{codigo}")
 def validar_rastreo_cliente(codigo: str, request: Request):
     mobile_auth.require_role(request, "cliente")
+    return _validar_codigo_soporte(request, codigo, "cliente")
+
+
+@router.get("/api/repartidor/validar_soporte/{id_repartidor}/{codigo}")
+def validar_rastreo_repartidor(id_repartidor: int, codigo: str, request: Request):
+    mobile_auth.require_actor_id(request, id_repartidor, "repartidor")
+    return _validar_codigo_soporte(request, codigo, "repartidor")
+
+
+@router.get("/api/comercio/validar_soporte/{id_comercio}/{codigo}")
+def validar_rastreo_comercio(id_comercio: int, codigo: str, request: Request):
+    mobile_auth.require_actor_id(request, id_comercio, "comercio")
+    return _validar_codigo_soporte(request, codigo, "comercio")
+
+
+def _validar_codigo_soporte(request: Request, codigo: str, rol: str):
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
@@ -369,7 +385,7 @@ def validar_rastreo_cliente(codigo: str, request: Request):
         
     id_pedido, estado, fecha_ref = pedido
     conexion.close()
-    mobile_auth.require_order_owner(request, id_pedido, "cliente")
+    mobile_auth.require_order_owner(request, id_pedido, rol)
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("SELECT id_soporte FROM soporte WHERE id_pedido = ? AND estado = 'abierto'", (id_pedido,))

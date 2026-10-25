@@ -382,8 +382,8 @@ class SoporteConsumidorPantalla extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (context) => AccesoSoporte(
-                        idCliente: idCliente,
-                        nombreCliente: nombreCliente,
+                        idUsuario: idCliente,
+                        nombre: nombreCliente,
                       ),
                     ),
                   );
