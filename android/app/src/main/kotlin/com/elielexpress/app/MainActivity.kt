@@ -1,4 +1,4 @@
-package com.example.perulapia_connect
+package com.elielexpress.app
 
 import io.flutter.embedding.android.FlutterActivity
 

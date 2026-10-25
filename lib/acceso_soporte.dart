@@ -1,6 +1,6 @@
 // Archivo: acceso_soporte.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'api_http.dart' as http;
 import 'dart:convert';
 import 'red.dart';
 import 'chat_soporte.dart';

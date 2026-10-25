@@ -1,6 +1,6 @@
 import 'acceso_soporte.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http; // Agregado para llamar a la API
+import 'api_http.dart' as http; // Agregado para llamar a la API
 import 'dart:convert'; // Agregado para leer JSON
 import 'red.dart'; // Agregado para usar urlCentral
 

@@ -8,6 +8,7 @@ import 'vista_consumidor.dart';
 import 'vista_comerciante.dart';
 import 'vista_repartidor.dart';
 import 'red.dart'; // <-- IMPORTADO
+import 'mobile_session.dart';
 
 // ==========================================
 // 1. PANTALLA DE INICIAR SESIÓN (LOGIN)
@@ -111,21 +112,30 @@ class _LoginPantallaState extends State<LoginPantalla> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
+      backgroundColor: const Color(0xFF081623),
+      body: Container(
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/logo.png'),
+            fit: BoxFit.fitWidth,
+            alignment: Alignment.topCenter,
+          ),
+        ),
+        child: SafeArea(
+        child: Align(
+        alignment: Alignment.bottomCenter,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32.0),
+          padding: const EdgeInsets.all(16.0),
+          child: Container(
+          padding: const EdgeInsets.all(24.0),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.delivery_dining, size: 80, color: Colors.blue),
-              const SizedBox(height: 10),
-              const Text(
-                'Conecta Perulapia',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 40),
               TextField(
                 controller: _loginUsuarioController,
                 decoration: const InputDecoration(
@@ -211,6 +221,15 @@ class _LoginPantallaState extends State<LoginPantalla> {
                                 json.decode(utf8.decode(respuesta.bodyBytes));
 
                             if (datosRespuesta['status'] == 'ok') {
+                              final token =
+                                  datosRespuesta['access_token']?.toString();
+                              if (token == null || token.isEmpty) {
+                                throw const FormatException(
+                                  'El servidor no devolvió el token de sesión.',
+                                );
+                              }
+                              await MobileSession.save(token);
+
                               // 🔥 LÓGICA DE ENRUTAMIENTO MAESTRO BLINDADA 🔥
                               final String rolUser = datosRespuesta['rol']
                                       ?.toString()
@@ -329,6 +348,9 @@ class _LoginPantallaState extends State<LoginPantalla> {
               ),
             ],
           ),
+          ),
+        ),
+        ),
         ),
       ),
     );
