@@ -44,6 +44,15 @@ class FlotaService {
       );
       final datos = json.decode(utf8.decode(res.bodyBytes));
       if (res.statusCode == 200 && datos is Map<String, dynamic>) return datos;
+      if (res.statusCode == 401) {
+        return {
+          'status': 'error',
+          'mensaje': 'Tu sesión venció. Cierra sesión y entra de nuevo.'
+        };
+      }
+      if (datos is Map && datos['detail'] is String) {
+        return {'status': 'error', 'mensaje': datos['detail']};
+      }
       return {'status': 'error', 'mensaje': 'No se pudo completar la acción.'};
     } catch (_) {
       return {'status': 'error', 'mensaje': 'Error de conexión.'};
