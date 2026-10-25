@@ -49,6 +49,23 @@ class PedidoService {
     }
   }
 
+  // 4. MARCAR LISTO (La comida terminó de cocinarse)
+  Future<bool> marcarListo(int idPedido) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/comercio_pedido_listo'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: json.encode({'id_pedido': idPedido}),
+      );
+      if (response.statusCode != 200) return false;
+      final datos = json.decode(utf8.decode(response.bodyBytes));
+      return datos is Map && datos['status'] == 'ok';
+    } catch (e) {
+      debugPrint('🚨 [POST] Fallo al marcar listo: $e');
+      return false;
+    }
+  }
+
   // ==========================================================
   // 3. CANCELAR PEDIDO (Opción para el comercio y cliente)
   // ==========================================================

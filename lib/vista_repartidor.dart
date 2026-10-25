@@ -281,13 +281,13 @@ class _RepaRadarState extends State<RepaRadar>
     super.dispose();
   }
 
-  Future<void> _trazarRutaHacia(LatLng destino) async {
+  Future<void> _trazarRutaHacia(LatLng destino, {bool enfocar = false}) async {
     if (_miUbicacionReal == null) return;
     try {
       final url = Uri.parse(
           'https://router.project-osrm.org/route/v1/driving/${_miUbicacionReal!.longitude},${_miUbicacionReal!.latitude};${destino.longitude},${destino.latitude}?geometries=geojson&overview=full');
 
-      final res = await http.get(url).timeout(const Duration(seconds: 4));
+      final res = await http.get(url).timeout(const Duration(seconds: 8));
 
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
@@ -303,10 +303,27 @@ class _RepaRadarState extends State<RepaRadar>
             _destinoSeleccionadoRuta = destino;
             _rutaCalles = puntos;
           });
+          if (enfocar) _enfocarRuta(puntos);
         }
       }
     } catch (e) {
       debugPrint("⚠️ No se pudo trazar la ruta: $e");
+    }
+  }
+
+  // Encuadra la ruta completa; solo se pide al pulsar "Ruta", no en cada refresco del GPS.
+  void _enfocarRuta(List<LatLng> puntos) {
+    if (puntos.isEmpty) return;
+    try {
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(puntos),
+          padding: const EdgeInsets.all(60),
+          maxZoom: 17,
+        ),
+      );
+    } catch (e) {
+      debugPrint("⚠️ No se pudo enfocar la ruta: $e");
     }
   }
 
@@ -565,7 +582,7 @@ class _RepaRadarState extends State<RepaRadar>
                             fontSize: 13,
                             fontWeight: FontWeight.bold)),
                     onPressed: () {
-                      _trazarRutaHacia(coordsLocal);
+                      _trazarRutaHacia(coordsLocal, enfocar: true);
                       Navigator.pop(ctx);
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -712,7 +729,8 @@ class _RepaRadarState extends State<RepaRadar>
                                           ),
                                           onPressed: () {
                                             Navigator.pop(ctx);
-                                            _trazarRutaHacia(coords);
+                                            _trazarRutaHacia(coords,
+                                                enfocar: true);
                                             ScaffoldMessenger.of(context)
                                                 .showSnackBar(
                                               const SnackBar(

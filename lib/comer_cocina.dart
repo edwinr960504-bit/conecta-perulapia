@@ -250,6 +250,18 @@ class _VistaCocinaState extends State<VistaCocina>
     }
   }
 
+  Future<void> _marcarListo(int idPed) async {
+    final exito = await _pedidoService.marcarListo(idPed);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(exito
+          ? "Pedido listo. Elige quién lo entrega."
+          : "No se pudo marcar como listo."),
+      backgroundColor: exito ? Colors.green : Colors.red,
+    ));
+    _cargarPedidosReales();
+  }
+
   Future<void> _elegirRepartidorPropio(int idPed) async {
     final libres = _flota.where((r) => !r.ocupado).toList();
     if (libres.isEmpty) {
@@ -488,6 +500,9 @@ class _VistaCocinaState extends State<VistaCocina>
                                   p['estado'] == 'asignado' ||
                                   p['estado'] == 'en_camino';
 
+                          final bool cocinando =
+                              p['estado'] == 'preparacion' && !motoristaAsignado;
+
                           final bool hayAlerta =
                               _hayMensajesNuevos[idPed] ?? false;
 
@@ -600,6 +615,58 @@ class _VistaCocinaState extends State<VistaCocina>
                                   else
                                     Column(
                                       children: [
+                                        if (cocinando)
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Column(
+                                              children: [
+                                                const Row(
+                                                  children: [
+                                                    Icon(Icons.soup_kitchen,
+                                                        color: Colors.orange),
+                                                    SizedBox(width: 8),
+                                                    Text("Cocinando...",
+                                                        style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 16)),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 10),
+                                                SizedBox(
+                                                  width: double.infinity,
+                                                  child: ElevatedButton.icon(
+                                                    style: ElevatedButton
+                                                        .styleFrom(
+                                                      backgroundColor:
+                                                          Colors.green,
+                                                      foregroundColor:
+                                                          Colors.white,
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          vertical: 12),
+                                                    ),
+                                                    icon: const Icon(
+                                                        Icons.check_circle),
+                                                    label: const Text(
+                                                        "PEDIDO LISTO",
+                                                        style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight
+                                                                    .bold)),
+                                                    onPressed: () =>
+                                                        _marcarListo(idPed),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         if (motoristaAsignado) ...[
                                           Row(
                                             children: [
@@ -713,6 +780,7 @@ class _VistaCocinaState extends State<VistaCocina>
                                           const SizedBox(height: 10),
                                         ],
                                         if (!motoristaAsignado &&
+                                            !cocinando &&
                                             _flota.isNotEmpty) ...[
                                           Row(
                                             children: [
@@ -751,7 +819,8 @@ class _VistaCocinaState extends State<VistaCocina>
                                           ),
                                           const SizedBox(height: 10),
                                         ],
-                                        SizedBox(
+                                        if (!cocinando)
+                                          SizedBox(
                                           width: double.infinity,
                                           child: ElevatedButton.icon(
                                             style: ElevatedButton.styleFrom(
