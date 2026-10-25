@@ -58,7 +58,7 @@ class ConectaApp extends StatelessWidget {
       // --- CONECTAMOS LA LLAVE MAESTRA AQUÍ ---
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
-      title: 'Conecta Perulapia',
+      title: 'Eliel Express',
 
       // ==========================================
       // TEMA VISUAL SOFISTICADO
@@ -163,7 +163,7 @@ class _PantallaCargaInicialState extends State<PantallaCargaInicial> {
             CircularProgressIndicator(strokeWidth: 3),
             SizedBox(height: 24),
             Text(
-              'Conecta Perulapia',
+              'Eliel Express',
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
