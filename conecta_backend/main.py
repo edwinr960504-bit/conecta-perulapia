@@ -20,6 +20,7 @@ import adm_soporte
 import mobile_auth
 import admin_core
 import flota_propia
+import sqlite3
 import os
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
