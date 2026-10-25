@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import sqlite3
 import os
 import shutil
+import mobile_auth
 
 router = APIRouter()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
@@ -66,18 +67,26 @@ class ActualizarContacto(BaseModel):
 @router.post("/api/login/")
 def login(cred: Credenciales):
     identificador_limpio = cred.identificador.strip().lower()
+    mobile_auth.ensure_mobile_schema()
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
     # 1. Buscar en usuarios (Clientes o Repartidores)
     cursor.execute("""
-        SELECT id_usuario, nombre, rol, estado 
+        SELECT id_usuario, nombre, rol, estado, contrasena, password_hash, password_salt
         FROM usuarios 
-        WHERE (telefono = ? OR LOWER(correo) = ? OR dui = ?) AND contrasena = ?
-    """, (identificador_limpio, identificador_limpio, identificador_limpio, cred.contrasena))
+        WHERE (telefono = ? OR LOWER(correo) = ? OR dui = ?)
+    """, (identificador_limpio, identificador_limpio, identificador_limpio))
     usuario = cursor.fetchone()
     
     if usuario:
+        if not mobile_auth.verify_and_upgrade_password(
+            cursor, "usuarios", usuario[0], cred.contrasena,
+            usuario[4], usuario[5], usuario[6],
+        ):
+            conexion.close()
+            return {"status": "error", "mensaje": "Credenciales incorrectas o cuenta no encontrada."}
+        conexion.commit()
         conexion.close()
         if usuario[3] == 'pendiente': return {"status": "error", "mensaje": "Cuenta en revisión por la Central."}
         if usuario[3] == 'suspendido': return {"status": "error", "mensaje": "Cuenta SUSPENDIDA."}
@@ -89,19 +98,27 @@ def login(cred: Credenciales):
             "id": usuario[0], 
             "id_identidad": f"{prefijo_rol}-{usuario[0]}",
             "nombre": usuario[1], 
-            "rol": usuario[2]
+            "rol": usuario[2],
+            "access_token": mobile_auth.issue_mobile_token(usuario[0], usuario[2])
         }
     
     # 2. Buscar en comercios
     cursor.execute("""
-        SELECT id_comercio, nombre_local, estado 
+        SELECT id_comercio, nombre_local, estado, contrasena, password_hash, password_salt
         FROM comercios 
-        WHERE (telefono = ? OR LOWER(correo) = ? OR dui = ?) AND contrasena = ?
-    """, (identificador_limpio, identificador_limpio, identificador_limpio, cred.contrasena))
+        WHERE (telefono = ? OR LOWER(correo) = ? OR dui = ?)
+    """, (identificador_limpio, identificador_limpio, identificador_limpio))
     comercio = cursor.fetchone()
-    conexion.close()
     
     if comercio:
+        if not mobile_auth.verify_and_upgrade_password(
+            cursor, "comercios", comercio[0], cred.contrasena,
+            comercio[3], comercio[4], comercio[5],
+        ):
+            conexion.close()
+            return {"status": "error", "mensaje": "Credenciales incorrectas o cuenta no encontrada."}
+        conexion.commit()
+        conexion.close()
         if comercio[2] == 'pendiente': return {"status": "error", "mensaje": "Comercio en revisión por la Central."}
         if comercio[2] == 'suspendido': return {"status": "error", "mensaje": "Comercio SUSPENDIDO."}
         
@@ -111,9 +128,11 @@ def login(cred: Credenciales):
             "id": comercio[0], 
             "id_identidad": f"C-{comercio[0]}",
             "nombre": comercio[1], 
-            "rol": "comercio"
+            "rol": "comercio",
+            "access_token": mobile_auth.issue_mobile_token(comercio[0], "comercio")
         }
     
+    conexion.close()
     return {"status": "error", "mensaje": "Credenciales incorrectas o cuenta no encontrada."}
 
 @router.post("/registrar_usuario")

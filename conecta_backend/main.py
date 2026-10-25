@@ -15,6 +15,8 @@ import tuberias_admin
 import tuberias_identidad
 import tuberias_negocio
 import adm_soporte
+import mobile_auth
+import admin_core
 import sqlite3
 import os
 
@@ -114,6 +116,9 @@ app = FastAPI(
     version="2.2 - Edición Logística Completa"
 )
 
+mobile_auth.ensure_mobile_schema()
+admin_core.ensure_admin_schema()
+
 # --- BLINDAJE CORS (Permite connections entrantes desde WiFi, Flutter y Streamlit sin bloqueos) ---
 app.add_middleware(
     CORSMiddleware,
@@ -143,6 +148,8 @@ app.include_router(tuberias_admin.router)
 app.include_router(tuberias_identidad.router)
 app.include_router(tuberias_negocio.router)
 app.include_router(adm_soporte.router)
+app.include_router(mobile_auth.router)
+app.include_router(admin_core.router)
 
 # ========================================================
 # ENDPOINTS DE CONTROL Y MONITOREO

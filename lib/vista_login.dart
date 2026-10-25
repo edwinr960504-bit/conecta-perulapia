@@ -8,6 +8,7 @@ import 'vista_consumidor.dart';
 import 'vista_comerciante.dart';
 import 'vista_repartidor.dart';
 import 'red.dart'; // <-- IMPORTADO
+import 'mobile_session.dart';
 
 // ==========================================
 // 1. PANTALLA DE INICIAR SESIÓN (LOGIN)
@@ -211,6 +212,15 @@ class _LoginPantallaState extends State<LoginPantalla> {
                                 json.decode(utf8.decode(respuesta.bodyBytes));
 
                             if (datosRespuesta['status'] == 'ok') {
+                              final token =
+                                  datosRespuesta['access_token']?.toString();
+                              if (token == null || token.isEmpty) {
+                                throw const FormatException(
+                                  'El servidor no devolvió el token de sesión.',
+                                );
+                              }
+                              await MobileSession.save(token);
+
                               // 🔥 LÓGICA DE ENRUTAMIENTO MAESTRO BLINDADA 🔥
                               final String rolUser = datosRespuesta['rol']
                                       ?.toString()

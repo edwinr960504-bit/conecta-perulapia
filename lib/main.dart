@@ -6,11 +6,15 @@ import 'vista_consumidor.dart';
 import 'vista_direcciones.dart';
 import 'vista_historial.dart';
 import 'vista_editar_perfil.dart';
+import 'mobile_session.dart';
 
 // --- LA LLAVE MAESTRA GLOBAL PARA LA MOTO VERDE ---
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await MobileSession.restore();
+
   // Atrapa errores para evitar la pantalla roja de Flutter
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return MaterialApp(
