@@ -13,6 +13,7 @@ import 'comer_menu.dart';
 import 'comer_billetera.dart';
 import 'comer_soporte.dart';
 import 'comer_ajustes.dart';
+import 'comer_flota.dart';
 
 class VistaComerciante extends StatefulWidget {
   final String nombreComercio;
@@ -206,6 +207,25 @@ class _VistaComercianteState extends State<VistaComerciante> {
                 }
 
                 _cargarLogoComercio();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.two_wheeler, color: Color(0xFF1E3A8A)),
+              title: const Text(
+                'Mis Repartidores',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: const Text('Reparto propio del local'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ComerFlota(
+                      idComercio: int.parse(widget.idComercio.toString()),
+                    ),
+                  ),
+                );
               },
             ),
             const Divider(),

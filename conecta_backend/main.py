@@ -19,7 +19,7 @@ import tuberias_negocio
 import adm_soporte
 import mobile_auth
 import admin_core
-import sqlite3
+import flota_propia
 import os
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
@@ -157,6 +157,7 @@ app.include_router(tuberias_identidad.router)
 app.include_router(tuberias_negocio.router)
 app.include_router(adm_soporte.router)
 app.include_router(mobile_auth.router)
+app.include_router(flota_propia.router)
 app.include_router(admin_core.router)
 
 

@@ -4,6 +4,7 @@
 # =====================================================================
 from fastapi import APIRouter
 import mobile_auth
+import flota_propia
 from pydantic import BaseModel
 import sqlite3
 import os
@@ -58,6 +59,10 @@ def repartidor_toma_pedido(req: TomarPedido, request: Request):
         return {"status": "error", "mensaje": "Falla de identidad. Reinicia tu app."}
         
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
+    permitido, motivo = flota_propia.repartidor_puede_tomar(cursor, req.id_repartidor, req.id_pedido)
+    if not permitido:
+        conexion.close()
+        return {"status": "error", "mensaje": motivo}
     # 🔥 CANDADO ATÓMICO: Asigna el pedido única y exclusivamente si estaba en cero.
     cursor.execute("""
         UPDATE pedidos SET estado = 'asignado', id_repartidor = ? 

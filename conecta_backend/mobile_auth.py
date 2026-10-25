@@ -42,6 +42,7 @@ def ensure_mobile_schema():
                 ("latitud_actual", "REAL"),
                 ("longitud_actual", "REAL"),
                 ("gps_actualizado_en", "TEXT"),
+                ("id_comercio_propio", "INTEGER"),
             ),
             "comercios": (
                 ("password_hash", "TEXT"),
@@ -50,6 +51,7 @@ def ensure_mobile_schema():
             "pedidos": (
                 ("gps_repartidor_en", "TEXT"),
                 ("gps_cliente_en", "TEXT"),
+                ("despacho_externo", "INTEGER DEFAULT 0"),
             ),
         }
         for table, columns_to_add in additions.items():
@@ -327,6 +329,7 @@ def authorize_path_resource(request, user):
         (r"/api/actualizar_gps_cliente", {"cliente"}),
         (r"/(?:api/)?(?:comercio_acepta|comercio_pedido_listo)", {"comercio"}),
         (r"/api/comercio/(?:actualizar_perfil|estado/\d+)", {"comercio"}),
+        (r"/api/comercio/(?:repartidores_propios(?:/quitar|/\d+)?|asignar_repartidor|lanzar_radar)", {"comercio"}),
         (r"/(?:api/)?(?:agregar_producto|registrar_producto|actualizar_producto|eliminar_producto)", {"comercio"}),
         (r"/api/(?:subir_foto_comercio|subir_foto_producto)", {"comercio"}),
         (r"/api/(?:enviar_soporte|chat/enviar_mensaje|chat/subir_evidencia)", {"cliente", "comercio", "repartidor"}),
@@ -350,6 +353,7 @@ def authorize_path_resource(request, user):
         (r"/api/historial_cliente/(\d+)", {"cliente"}),
         (r"/(?:api/)?cliente/limpiar_todo/(\d+)", {"cliente"}),
         (r"/api/comercio/estado/(\d+)", {"comercio"}),
+        (r"/api/comercio/repartidores_propios/(\d+)", {"comercio"}),
         (r"/(?:api/)?billetera/comercio/(\d+)", {"comercio"}),
     )
     for pattern, allowed_roles in actor_patterns:

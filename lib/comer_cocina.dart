@@ -9,6 +9,7 @@ import 'logistica_service.dart';
 import 'red.dart';
 import 'mapa_comerciante.dart'; // Extrae la memoria global
 import 'chat_pedido.dart';
+import 'comer_flota.dart';
 
 class BotonRepartidorEnCaminoCompacto extends StatefulWidget {
   final VoidCallback onPressed;
@@ -78,6 +79,7 @@ class _VistaCocinaState extends State<VistaCocina>
     with TickerProviderStateMixin {
   final PedidoService _pedidoService = PedidoService();
   List<dynamic> _pedidos = [];
+  List<RepartidorPropio> _flota = [];
   bool _cargando = true;
   Timer? _latido;
 
@@ -114,9 +116,12 @@ class _VistaCocinaState extends State<VistaCocina>
   Future<void> _cargarPedidosReales() async {
     try {
       final pedidos = await _pedidoService.obtenerPedidos(widget.idComercio);
+      final flota =
+          await FlotaService.listar(int.parse(widget.idComercio.toString()));
       if (mounted) {
         setState(() {
           _pedidos = pedidos;
+          _flota = flota;
           _cargando = false;
         });
 
@@ -243,6 +248,55 @@ class _VistaCocinaState extends State<VistaCocina>
     } catch (e) {
       debugPrint("Error al aceptar pedido: $e");
     }
+  }
+
+  Future<void> _elegirRepartidorPropio(int idPed) async {
+    final libres = _flota.where((r) => !r.ocupado).toList();
+    if (libres.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Tus repartidores están ocupados. Lanza el pedido al radar."),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+    final elegido = await showModalBottomSheet<RepartidorPropio>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text("Asignar a un repartidor libre",
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            for (final r in libres)
+              ListTile(
+                leading: const Icon(Icons.two_wheeler, color: Colors.teal),
+                title: Text(r.nombre),
+                subtitle: Text(r.telefono),
+                onTap: () => Navigator.pop(ctx, r),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (elegido == null) return;
+    final res = await FlotaService.asignar(idPed, elegido.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res['mensaje'] ?? ''),
+      backgroundColor: res['status'] == 'ok' ? Colors.green : Colors.red,
+    ));
+    _cargarPedidosReales();
+  }
+
+  Future<void> _lanzarARadar(int idPed) async {
+    final res = await FlotaService.lanzarRadar(idPed);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res['mensaje'] ?? ''),
+      backgroundColor: res['status'] == 'ok' ? Colors.green : Colors.red,
+    ));
   }
 
   void _mostrarDialogoEntrega(int idPed) {
@@ -652,6 +706,45 @@ class _VistaCocinaState extends State<VistaCocina>
                                                       });
                                                     },
                                                   ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 10),
+                                        ],
+                                        if (!motoristaAsignado &&
+                                            _flota.isNotEmpty) ...[
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: ElevatedButton.icon(
+                                                  style:
+                                                      ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.teal.shade700,
+                                                    foregroundColor:
+                                                        Colors.white,
+                                                  ),
+                                                  icon: const Icon(
+                                                      Icons.two_wheeler,
+                                                      size: 18),
+                                                  label: const Text(
+                                                      "Mi repartidor"),
+                                                  onPressed: () =>
+                                                      _elegirRepartidorPropio(
+                                                          idPed),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: OutlinedButton.icon(
+                                                  icon: const Icon(
+                                                      Icons.radar,
+                                                      size: 18),
+                                                  label: const Text(
+                                                      "Lanzar a radar"),
+                                                  onPressed: () =>
+                                                      _lanzarARadar(idPed),
                                                 ),
                                               ),
                                             ],

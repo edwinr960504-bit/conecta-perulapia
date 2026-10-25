@@ -3,6 +3,7 @@
 # =====================================================================
 from fastapi import APIRouter, Request
 import mobile_auth
+import flota_propia
 from pydantic import BaseModel
 import sqlite3
 import os
@@ -380,10 +381,23 @@ def limpiar_todo_cliente(id_cliente: int):
 @router.get("/pedidos_disponibles/")
 @router.get("/api/pedidos_disponibles")
 @router.get("/api/pedidos_disponibles/")
-def pedidos_disponibles():
+def pedidos_disponibles(request: Request):
+    mobile_auth.ensure_mobile_schema()
+    usuario = getattr(request.state, "mobile_user", None) or {}
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
-    cursor.execute("""
+    cursor.execute("SELECT id_comercio_propio FROM usuarios WHERE id_usuario = ?", (usuario.get("id"),))
+    fila = cursor.fetchone()
+    comercio_propio = fila[0] if fila else None
+    if comercio_propio:
+        filtro_flota = "AND p.id_comercio = ?"
+        parametros = (comercio_propio,)
+    else:
+        filtro_flota = """AND (COALESCE(p.despacho_externo, 0) = 1 OR NOT EXISTS (
+            SELECT 1 FROM usuarios f WHERE f.id_comercio_propio = p.id_comercio
+              AND f.rol = 'repartidor' AND f.estado = 'activo'))"""
+        parametros = ()
+    cursor.execute(f"""
         SELECT p.id_pedido, p.descripcion, p.precio_comida, p.total_pago, p.estado, p.fecha,
                COALESCE(c.nombre_local, 'Comercio Local'), p.id_comercio,
                c.latitud, c.longitud, p.latitud_comercio, p.longitud_comercio,
@@ -392,8 +406,9 @@ def pedidos_disponibles():
         LEFT JOIN comercios c ON p.id_comercio = c.id_comercio
         WHERE p.estado IN ('preparacion', 'listo_recoleccion', 'pendiente') 
           AND (p.id_repartidor = 0 OR p.id_repartidor IS NULL)
+          {filtro_flota}
         ORDER BY p.id_pedido ASC
-    """)
+    """, parametros)
     filas = cursor.fetchall()
     conexion.close()
     
