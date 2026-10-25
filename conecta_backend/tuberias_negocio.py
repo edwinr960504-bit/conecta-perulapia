@@ -2,7 +2,8 @@
 # ARCHIVO COMPLETO: tuberias_negocio.py (CON SOPORTE DE LAT/LON Y DUI)
 # PROPÓSITO: Gestión completa de comercios, menús, logos y registros geolocalizados
 # ========================================================
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Request
+import mobile_auth
 import sqlite3
 import os
 import shutil
@@ -125,7 +126,8 @@ def registrar_comercio(c: ComercioNuevo):
 @router.post("/subir_foto_comercio")
 @router.post("/api/subir_foto_comercio")
 @router.post("/api/subir_foto_comercio/")
-async def subir_foto_comercio(id_comercio: str = Form(...), file: UploadFile = File(...)):
+async def subir_foto_comercio(request: Request, id_comercio: str = Form(...), file: UploadFile = File(...)):
+    mobile_auth.require_actor_id(request, id_comercio, "comercio")
     ruta_carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fotos_seguridad")
     os.makedirs(ruta_carpeta, exist_ok=True)
     
@@ -180,8 +182,9 @@ def obtener_perfil_comercio(id_comercio: int):
     return {"status": "error", "mensaje": "Comercio no encontrado en la base de datos"}
 
 @router.post("/api/comercio/actualizar_perfil")
-def actualizar_perfil_comercio(datos: dict):
+def actualizar_perfil_comercio(datos: dict, request: Request):
     id_comercio = datos.get('id_comercio')
+    mobile_auth.require_actor_id(request, id_comercio, "comercio")
     nombre = datos.get('nombre_local')
     direccion = datos.get('direccion')
     horarios = datos.get('horarios')
@@ -222,7 +225,8 @@ def actualizar_perfil_comercio(datos: dict):
 @router.post("/subir_foto_producto/")
 @router.post("/api/subir_foto_producto")
 @router.post("/api/subir_foto_producto/")
-async def subir_foto_producto(id_producto: int = Form(...), file: UploadFile = File(...)):
+async def subir_foto_producto(request: Request, id_producto: int = Form(...), file: UploadFile = File(...)):
+    mobile_auth.require_product_owner(request, id_producto, "comercio")
     ruta_carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fotos_seguridad")
     os.makedirs(ruta_carpeta, exist_ok=True)
     nombre_archivo = f"producto_{id_producto}_{file.filename}"
@@ -274,7 +278,8 @@ def obtener_productos(id_comercio: str):
 @router.post("/api/agregar_producto/")
 @router.post("/api/registrar_producto")
 @router.post("/api/registrar_producto/")
-def agregar_producto(p: ProductoNuevo):
+def agregar_producto(p: ProductoNuevo, request: Request):
+    mobile_auth.require_actor_id(request, p.id_comercio, "comercio")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("""
@@ -290,7 +295,8 @@ def agregar_producto(p: ProductoNuevo):
 @router.post("/actualizar_producto/")
 @router.post("/api/actualizar_producto")
 @router.post("/api/actualizar_producto/")
-def actualizar_producto(ep: EstadoProducto):
+def actualizar_producto(ep: EstadoProducto, request: Request):
+    mobile_auth.require_product_owner(request, ep.id_producto, "comercio")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     if ep.foto:
@@ -319,7 +325,8 @@ def actualizar_producto(ep: EstadoProducto):
 @router.post("/eliminar_producto/")
 @router.post("/api/eliminar_producto")
 @router.post("/api/eliminar_producto/")
-def eliminar_producto(del_req: EliminarProducto):
+def eliminar_producto(del_req: EliminarProducto, request: Request):
+    mobile_auth.require_product_owner(request, del_req.id_producto, "comercio")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM productos WHERE id_producto = ?", (del_req.id_producto,))

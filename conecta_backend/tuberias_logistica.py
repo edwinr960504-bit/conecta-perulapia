@@ -3,6 +3,7 @@
 # PROPÓSITO: Bolsa de trabajo de Motoristas, GPS, Cierre de Chats y Avisos
 # =====================================================================
 from fastapi import APIRouter
+import mobile_auth
 from pydantic import BaseModel
 import sqlite3
 import os
@@ -51,7 +52,8 @@ def bolsa_repartidores():
 
 @router.post("/tomar_pedido")
 @router.post("/api/tomar_pedido")
-def repartidor_toma_pedido(req: TomarPedido):
+def repartidor_toma_pedido(req: TomarPedido, request: Request):
+    mobile_auth.require_actor_id(request, req.id_repartidor, "repartidor")
     if not req.id_repartidor or req.id_repartidor <= 0:
         return {"status": "error", "mensaje": "Falla de identidad. Reinicia tu app."}
         
@@ -73,7 +75,8 @@ def repartidor_toma_pedido(req: TomarPedido):
 
 # 🔥 NUEVO: BOTÓN "YA LLEGUÉ"
 @router.post("/api/repartidor/notificar_llegada")
-def notificar_llegada(req: NotificarLlegada):
+def notificar_llegada(req: NotificarLlegada, request: Request):
+    mobile_auth.require_order_owner(request, req.id_pedido, "repartidor")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
@@ -98,6 +101,7 @@ async def recoger_en_local(request: Request):
     datos = await request.json()
     id_orden = datos.get("id_pedido") or datos.get("id") or datos.get("orden_id")
     pin_ingresado = str(datos.get("pin") or datos.get("pin_recoleccion") or "").strip()
+    mobile_auth.require_order_owner(request, id_orden, "repartidor")
     
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
@@ -131,7 +135,8 @@ async def recoger_en_local(request: Request):
 
 @router.post("/entregar_pedido")
 @router.post("/api/entregar_pedido")
-def entregar_a_cliente(req: ValidarPin):
+def entregar_a_cliente(req: ValidarPin, request: Request):
+    mobile_auth.require_order_owner(request, req.id_pedido, "repartidor")
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     cursor.execute("SELECT pin_seguridad FROM pedidos WHERE id_pedido = ?", (req.id_pedido,))
     row = cursor.fetchone()
@@ -161,7 +166,8 @@ def entregar_a_cliente(req: ValidarPin):
     
 @router.post("/actualizar_gps")
 @router.post("/api/actualizar_gps")
-def gps_motorista(req: ActualizarGPS):
+def gps_motorista(req: ActualizarGPS, request: Request):
+    mobile_auth.require_order_owner(request, req.id_pedido, "repartidor")
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     cursor.execute("""
         UPDATE pedidos SET latitud_repartidor = ?, longitud_repartidor = ? 
@@ -234,8 +240,9 @@ def obtener_billetera_repartidor(id_repartidor: int):
     }
 
 @router.post("/api/repartidor/borrar_movimiento")
-def borrar_movimiento_repartidor(datos: dict):
+def borrar_movimiento_repartidor(datos: dict, request: Request):
     id_pedido = datos.get("id_pedido")
+    mobile_auth.require_order_owner(request, id_pedido, "repartidor")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_pedido = ?", (id_pedido,))

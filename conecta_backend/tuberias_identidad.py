@@ -2,7 +2,7 @@
 # ARCHIVO COMPLETO: tuberias_identidad.py (BLINDADO CON PREFIJOS Y MAPAS REALES)
 # PROPÓSITO: Autenticación, perfiles de usuario, viajes activos y registros
 # ========================================================
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, Request
 from pydantic import BaseModel
 import sqlite3
 import os
@@ -224,13 +224,15 @@ def obtener_perfil(id_usuario: int):
 @router.post("/actualizar_contacto/")
 @router.post("/api/actualizar_contacto")
 @router.post("/api/actualizar_contacto/")
-def actualizar_contacto(datos: ActualizarContacto, id_usuario: int = None):
+def actualizar_contacto(datos: ActualizarContacto, request: Request, id_usuario: int = None):
     target_id = id_usuario if id_usuario else datos.id_usuario
     
     try:
         target_id_limpio = int(target_id)
     except (TypeError, ValueError):
         return {"status": "error", "mensaje": "ID de usuario no válido."}
+
+    mobile_auth.require_actor_id(request, target_id_limpio, "cliente", "repartidor")
 
     if target_id_limpio <= 0:
         return {"status": "error", "mensaje": "Error de identidad. Cierre sesión e intente de nuevo."}
@@ -265,7 +267,8 @@ def actualizar_contacto(datos: ActualizarContacto, id_usuario: int = None):
 @router.post("/subir_foto_cliente/")
 @router.post("/api/subir_foto_cliente")
 @router.post("/api/subir_foto_cliente/")
-async def subir_foto_cliente(id_cliente: str = Form(...), file: UploadFile = File(...)):
+async def subir_foto_cliente(request: Request, id_cliente: str = Form(...), file: UploadFile = File(...)):
+    mobile_auth.require_actor_id(request, id_cliente, "cliente", "repartidor")
     ruta_carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fotos_seguridad")
     os.makedirs(ruta_carpeta, exist_ok=True)
     nombre_archivo = f"cliente_{id_cliente}_{file.filename}"

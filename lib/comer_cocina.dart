@@ -1,6 +1,6 @@
 // Archivo: comer_cocina.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'api_http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 

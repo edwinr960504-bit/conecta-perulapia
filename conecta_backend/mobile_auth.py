@@ -297,22 +297,60 @@ def require_actor_id(request: Request, actor_id, *roles):
     return user
 
 
+def require_product_owner(request: Request, product_id, *roles):
+    user = require_role(request, *roles)
+    try:
+        product_id = int(product_id)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail="El identificador del producto no es válido.") from error
+    with _connection() as connection:
+        row = connection.execute(
+            "SELECT id_comercio FROM productos WHERE id_producto = ?",
+            (product_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+    if user["role"] == "comercio" and row[0] != user["id"]:
+        raise HTTPException(status_code=403, detail="El producto no pertenece a este comercio.")
+    return user
+
+
 def authorize_path_resource(request, user):
     path = request.url.path.rstrip("/")
+    role_patterns = (
+        (r"/(?:api/)?crear_pedido", {"cliente"}),
+        (r"/(?:api/)?pedidos_disponibles", {"repartidor"}),
+        (r"/(?:api/)?tomar_pedido", {"repartidor"}),
+        (r"/api/repartidor/(?:notificar_llegada|borrar_movimiento)", {"repartidor"}),
+        (r"/api/motorista/actualizar_gps_vivo", {"repartidor"}),
+        (r"/(?:api/)?(?:recoger_pedido|entregar_pedido|actualizar_gps)", {"repartidor"}),
+        (r"/api/actualizar_gps_cliente", {"cliente"}),
+        (r"/(?:api/)?(?:comercio_acepta|comercio_pedido_listo)", {"comercio"}),
+        (r"/api/comercio/(?:actualizar_perfil|estado/\d+)", {"comercio"}),
+        (r"/(?:api/)?(?:agregar_producto|registrar_producto|actualizar_producto|eliminar_producto)", {"comercio"}),
+        (r"/api/(?:subir_foto_comercio|subir_foto_producto)", {"comercio"}),
+        (r"/api/(?:enviar_soporte|chat/enviar_mensaje|chat/subir_evidencia)", {"cliente", "comercio", "repartidor"}),
+        (r"/api/cliente/(?:notificaciones_chat|validar_soporte/[^/]+)", {"cliente"}),
+        (r"/api/chat/(?:borrar_mensaje/\d+|borrar_todo/-?\d+)", {"cliente", "comercio", "repartidor"}),
+        (r"/api/(?:actualizar_contacto|subir_foto_cliente)", {"cliente", "repartidor"}),
+    )
+    for pattern, allowed_roles in role_patterns:
+        if re.fullmatch(pattern, path) and user["role"] not in allowed_roles:
+            raise HTTPException(status_code=403, detail="La operación no está permitida para este rol.")
     actor_patterns = (
-        (r"/api/perfil/(\d+)", {"cliente", "repartidor"}),
+        (r"/(?:api/)?perfil/(\d+)", {"cliente", "repartidor"}),
         (r"/api/comercio/perfil/(\d+)", {"comercio"}),
-        (r"/api/pedidos_comercio/(\d+)", {"comercio"}),
-        (r"/api/viaje_activo/repartidor/(\d+)", {"repartidor"}),
-        (r"/api/repartidor/billetera/(\d+)", {"repartidor"}),
-        (r"/api/repartidor/limpiar_todo/(\d+)", {"repartidor"}),
+        (r"/(?:api/)?pedidos_comercio/(\d+)", {"comercio"}),
+        (r"/(?:api/)?viaje_activo/repartidor/(\d+)", {"repartidor"}),
+        (r"/(?:api/)?repartidor/billetera/(\d+)", {"repartidor"}),
+        (r"/(?:api/)?repartidor/limpiar_todo/(\d+)", {"repartidor"}),
         (r"/api/cliente/mis_tickets/(\d+)", {"cliente"}),
         (r"/api/cliente/chat_activo/(\d+)", {"cliente"}),
         (r"/api/pedidos_activos/cliente/(\d+)", {"cliente"}),
         (r"/api/historial_cliente/(\d+)", {"cliente"}),
-        (r"/api/cliente/limpiar_todo/(\d+)", {"cliente"}),
+        (r"/(?:api/)?cliente/limpiar_todo/(\d+)", {"cliente"}),
         (r"/api/comercio/estado/(\d+)", {"comercio"}),
-        (r"/api/billetera/comercio/(\d+)", {"comercio"}),
+        (r"/(?:api/)?billetera/comercio/(\d+)", {"comercio"}),
     )
     for pattern, allowed_roles in actor_patterns:
         match = re.fullmatch(pattern, path)
@@ -333,8 +371,7 @@ def authorize_path_resource(request, user):
             return
 
     if re.fullmatch(r"/api/cliente/validar_soporte/[^/]+", path):
-        actor_id = request.query_params.get("id_cliente")
-        require_actor_id(request, actor_id, "cliente")
+        require_role(request, "cliente")
 
     order_match = re.fullmatch(
         r"/api/(?:chat/(?:historial|codigo_por_pedido)|obtener_gps|obtener_gps_pedido)/(-?\d+)",

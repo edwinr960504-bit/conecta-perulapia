@@ -3,10 +3,12 @@
 # PROPÓSITO: Servidor Central y Director de Tráfico de Conecta Perulapía
 # CONECTA CON: Streamlit (Panel Central), Flutter (App Clientes/Motoristas)
 # ========================================================
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import re
 
 # --- IMPORTACIÓN DE LAS 5 TUBERÍAS MAESTRAS ---
 import tuberias_pedidos
@@ -54,8 +56,12 @@ def inicializar_base_maestra():
             correo TEXT,
             contrasena TEXT,
             direccion TEXT,
+            horarios TEXT DEFAULT 'Sin horarios',
             tipo_plan TEXT,
             logo TEXT,
+            dui TEXT DEFAULT '00000000-0',
+            latitud REAL DEFAULT 13.7746,
+            longitud REAL DEFAULT -89.0244,
             estado TEXT DEFAULT 'pendiente',
             fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -83,6 +89,8 @@ def inicializar_base_maestra():
             longitud_repartidor REAL DEFAULT 0.0,
             latitud_cliente REAL DEFAULT 13.7333,
             longitud_cliente REAL DEFAULT -89.1167,
+            latitud_comercio REAL DEFAULT 13.7746,
+            longitud_comercio REAL DEFAULT -89.0244,
             tiempo_preparacion TEXT DEFAULT 'Por confirmar',
             numero_diario INTEGER DEFAULT 1,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -150,6 +158,56 @@ app.include_router(tuberias_negocio.router)
 app.include_router(adm_soporte.router)
 app.include_router(mobile_auth.router)
 app.include_router(admin_core.router)
+
+
+_PUBLIC_LOGIN_PATTERNS = (
+    re.compile(r"/(?:api/)?login/?"),
+    re.compile(r"/(?:api/)?registrar_(?:usuario|repartidor|comercio)/?"),
+)
+_PUBLIC_CATALOG_PATTERNS = (
+    re.compile(r"/(?:api/)?comercios_activos/?"),
+    re.compile(r"/(?:api/)?productos_comercio/\d+/?"),
+)
+_PUBLIC_GET_ROUTES = {"/", "/ping", "/api/ping", "/api/obtener_anuncio"}
+_ADMIN_LOGIN = "/api/admin/auth/login"
+_PUBLIC_DOCS = {"/docs", "/redoc", "/openapi.json"}
+_PUBLIC_STATIC = ("/static/", "/fotos_seguridad/")
+
+
+@app.middleware("http")
+async def autenticar_rutas_api(request: Request, call_next):
+    path = request.url.path.rstrip("/") or "/"
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    is_public_login = request.method == "POST" and any(
+        pattern.fullmatch(path) for pattern in _PUBLIC_LOGIN_PATTERNS
+    )
+    is_public_catalog = request.method == "GET" and any(
+        pattern.fullmatch(path) for pattern in _PUBLIC_CATALOG_PATTERNS
+    )
+    if (
+        is_public_login
+        or is_public_catalog
+        or (request.method in {"GET", "HEAD"} and path in _PUBLIC_GET_ROUTES)
+        or (request.method == "POST" and path == _ADMIN_LOGIN)
+        or (request.method in {"GET", "HEAD"} and path in _PUBLIC_DOCS)
+        or (request.method in {"GET", "HEAD"} and path.startswith(_PUBLIC_STATIC))
+    ):
+        return await call_next(request)
+
+    try:
+        if path.startswith("/api/admin/"):
+            await admin_core.require_admin(request)
+        else:
+            user = await mobile_auth.require_mobile_user(request)
+            mobile_auth.authorize_path_resource(request, user)
+    except HTTPException as error:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": error.detail},
+            headers=error.headers,
+        )
+    return await call_next(request)
 
 # ========================================================
 # ENDPOINTS DE CONTROL Y MONITOREO
@@ -279,7 +337,8 @@ class GpsMotoristaVivo(BaseModel):
 
 # --- ENDPOINT 1: RECEPTOR DE LA APP DEL MOTORISTA ---
 @app.post("/api/motorista/actualizar_gps_vivo")
-def actualizar_gps_vivo(datos: GpsMotoristaVivo):
+def actualizar_gps_vivo(datos: GpsMotoristaVivo, request: Request):
+    mobile_auth.require_actor_id(request, datos.id_usuario, "repartidor")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("""

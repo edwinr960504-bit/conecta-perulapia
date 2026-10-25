@@ -2,13 +2,15 @@
 # ARCHIVO: adm_soporte.py (VERSIÓN DEFINITIVA Y BLINDADA - CHAT DINÁMICO)
 # PROPÓSITO: Chat en vivo, Tickets de Soporte, Alertas y Publicidad
 # ========================================================
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+import mobile_auth
 from pydantic import BaseModel
 import sqlite3
 import os
 import shutil
 import uuid
 from datetime import datetime, timedelta
+from contextlib import closing
 
 router = APIRouter()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conecta_local.db")
@@ -72,15 +74,38 @@ class TicketSoporte(BaseModel):
     mensaje: str
     evidencia: str = ""
 
+def _require_chat_access(request: Request, order_id: int):
+    user = request.state.mobile_user
+    if order_id < 0:
+        return mobile_auth.require_actor_id(request, -order_id, user["role"])
+    if order_id == 0:
+        raise HTTPException(status_code=422, detail="El chat debe vincularse a una cuenta o pedido.")
+    return mobile_auth.require_order_owner(request, order_id, user["role"])
+
+
 # ========================================================
 # 1. TUBERÍAS DEL CHAT Y MENSAJERÍA (CON CANALES DINÁMICOS)
 # ========================================================
 @router.post("/api/chat/enviar_mensaje")
-def enviar_mensaje(req: MensajeChat):
+def enviar_mensaje(req: MensajeChat, request: Request):
+    _require_chat_access(request, req.id_pedido)
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
     # 🔥 LÓGICA DINÁMICA: Determina si el chat es con el local o con el cliente
+    user = request.state.mobile_user
+    channel_roles = {
+        "motorista_comercio": {"repartidor", "comercio"},
+        "motorista_consumidor": {"repartidor", "cliente"},
+        "admin_cliente": {"cliente"},
+        "admin_cliente_personal": {"cliente"},
+        "admin_comercio": {"comercio"},
+        "admin_comercio_personal": {"comercio"},
+        "admin_repartidor": {"repartidor"},
+        "admin_repartidor_personal": {"repartidor"},
+    }
+    if req.canal not in channel_roles or user["role"] not in channel_roles[req.canal]:
+        raise HTTPException(status_code=403, detail="El canal de chat no está permitido para esta cuenta.")
     canal_final = req.canal
     cursor.execute("SELECT estado FROM pedidos WHERE id_pedido = ?", (req.id_pedido,))
     estado_pedido = cursor.fetchone()
@@ -109,15 +134,21 @@ def enviar_mensaje(req: MensajeChat):
         else:
             cursor.execute("""
                 INSERT INTO soporte (id_usuario, rol, id_pedido, mensaje, evidencia, estado) 
-                VALUES (1, 'cliente', ?, ?, ?, 'abierto')
-            """, (req.id_pedido, req.mensaje, req.evidencia))
+                VALUES (?, ?, ?, ?, ?, 'abierto')
+            """, (user["id"], user["role"], req.id_pedido, req.mensaje, req.evidencia))
     
     conexion.commit()
     conexion.close()
     return {"status": "ok", "canal": canal_final, "mensaje": "Mensaje enviado exitosamente"}
 
 @router.post("/api/enviar_soporte")
-def enviar_soporte(req: TicketSoporte):
+def enviar_soporte(req: TicketSoporte, request: Request):
+    user = request.state.mobile_user
+    mobile_auth.require_actor_id(request, req.id_usuario, user["role"])
+    if req.rol.lower() != user["role"]:
+        raise HTTPException(status_code=403, detail="El rol del ticket no coincide con la sesión.")
+    if req.id_pedido:
+        _require_chat_access(request, req.id_pedido)
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
@@ -136,7 +167,8 @@ def enviar_soporte(req: TicketSoporte):
     return {"status": "ok", "mensaje": "Ticket abierto exitosamente en disco."}
 
 @router.get("/api/chat/historial/{id_pedido}")
-def obtener_historial_chat(id_pedido: int, canal: str = None):
+def obtener_historial_chat(id_pedido: int, request: Request, canal: str = None):
+    _require_chat_access(request, id_pedido)
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
@@ -172,7 +204,15 @@ def obtener_historial_chat(id_pedido: int, canal: str = None):
     return {"status": "ok", "canal_activo": canal_activo, "mensajes": mensajes}
 
 @router.delete("/api/chat/borrar_mensaje/{id_mensaje}")
-def borrar_un_mensaje(id_mensaje: int):
+def borrar_un_mensaje(id_mensaje: int, request: Request):
+    with closing(sqlite3.connect(DB_PATH)) as conexion:
+        row = conexion.execute(
+            "SELECT id_pedido FROM mensajes_chat WHERE id_mensaje = ?",
+            (id_mensaje,),
+        ).fetchone()
+    if not row:
+        return {"status": "error", "mensaje": "Mensaje no encontrado."}
+    _require_chat_access(request, row[0])
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM mensajes_chat WHERE id_mensaje = ?", (id_mensaje,))
@@ -183,7 +223,8 @@ def borrar_un_mensaje(id_mensaje: int):
     return {"status": "ok", "mensaje": "Mensaje borrado permanentemente"}
 
 @router.delete("/api/chat/borrar_todo/{id_pedido}")
-def borrar_todo_chat(id_pedido: int):
+def borrar_todo_chat(id_pedido: int, request: Request):
+    _require_chat_access(request, id_pedido)
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("DELETE FROM mensajes_chat WHERE id_pedido = ?", (id_pedido,))
@@ -292,15 +333,17 @@ def alertas_dashboard():
         return {"pedidos_activos": 0, "cuentas_pendientes": 0, "tickets_abiertos": 0}
 
 @router.get("/api/cliente/notificaciones_chat")
-def notificaciones_cliente():
+def notificaciones_cliente(request: Request):
+    user = mobile_auth.require_role(request, "cliente")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("""
         SELECT COUNT(*) 
         FROM mensajes_chat m
         JOIN soporte s ON m.id_pedido = s.id_pedido
-        WHERE m.leido = 0 AND m.remitente = 'Admin Central' AND s.estado = 'abierto' AND m.canal = 'admin_cliente'
-    """)
+        WHERE m.leido = 0 AND m.remitente = 'Admin Central' AND s.estado = 'abierto'
+          AND m.canal = 'admin_cliente' AND s.id_usuario = ? AND LOWER(s.rol) = 'cliente'
+    """, (user["id"],))
     count = cursor.fetchone()[0]
     conexion.close()
     return {"sin_leer": count}
@@ -309,7 +352,8 @@ def notificaciones_cliente():
 # 4. REGLA DE 3 HORAS Y ACCESO DEL CLIENTE
 # ========================================================
 @router.get("/api/cliente/validar_soporte/{codigo}")
-def validar_rastreo_cliente(codigo: str):
+def validar_rastreo_cliente(codigo: str, request: Request):
+    mobile_auth.require_role(request, "cliente")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     
@@ -324,7 +368,10 @@ def validar_rastreo_cliente(codigo: str):
         return {"status": "error", "mensaje": "Ese código de rastreo no existe en nuestra base de datos."}
         
     id_pedido, estado, fecha_ref = pedido
-    
+    conexion.close()
+    mobile_auth.require_order_owner(request, id_pedido, "cliente")
+    conexion = sqlite3.connect(DB_PATH)
+    cursor = conexion.cursor()
     cursor.execute("SELECT id_soporte FROM soporte WHERE id_pedido = ? AND estado = 'abierto'", (id_pedido,))
     if cursor.fetchone():
         conexion.close()
@@ -418,7 +465,8 @@ async def subir_evidencia(archivo: UploadFile = File(...)):
 # ENDPOINT PARA EXTRAER EL CÓDIGO DE RASTREO REAL EN EL CHAT
 # ========================================================
 @router.get("/api/chat/codigo_por_pedido/{id_pedido}")
-def obtener_codigo_por_pedido(id_pedido: int):
+def obtener_codigo_por_pedido(id_pedido: int, request: Request):
+    _require_chat_access(request, id_pedido)
     if id_pedido < 0:
         return {"status": "ok", "codigo_rastreo": "Soporte General"}
     

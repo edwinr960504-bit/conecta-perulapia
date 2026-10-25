@@ -1,6 +1,6 @@
 // Archivo: chat_pedido.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'api_http.dart' as http;
 import 'package:image_picker/image_picker.dart'; // 🔥 Para elegir fotos o cámara
 import 'dart:convert';
 import 'dart:async';

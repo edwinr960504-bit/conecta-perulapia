@@ -1,7 +1,8 @@
 # =====================================================================
 # ARCHIVO COMPLETO: tuberias_pedidos.py (BLINDADO CON UBICACIÓN EXACTA)
 # =====================================================================
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+import mobile_auth
 from pydantic import BaseModel
 import sqlite3
 import os
@@ -60,7 +61,8 @@ class AccionComercio(BaseModel):
 @router.post("/crear_pedido/")
 @router.post("/api/crear_pedido")
 @router.post("/api/crear_pedido/")
-def crear_pedido(p: PedidoNuevo):
+def crear_pedido(p: PedidoNuevo, request: Request):
+    mobile_auth.require_actor_id(request, p.id_cliente, "cliente")
     conexion = sqlite3.connect(DB_PATH)
     conexion.execute("BEGIN IMMEDIATE;")
     cursor = conexion.cursor()
@@ -161,8 +163,9 @@ def ver_pedidos_cocina(id_comercio: int):
 @router.post("/comercio_acepta/")
 @router.post("/api/comercio_acepta")
 @router.post("/api/comercio_acepta/")
-def comercio_acepta(req: AccionComercio):
+def comercio_acepta(req: AccionComercio, request: Request):
     id_orden = req.id_pedido or req.id or req.orden_id
+    mobile_auth.require_order_owner(request, id_orden, "comercio")
     tiempo_cocina = req.tiempo_preparacion or req.tiempo or "20 minutos"
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
@@ -180,8 +183,9 @@ def comercio_acepta(req: AccionComercio):
 @router.post("/comercio_pedido_listo/")
 @router.post("/api/comercio_pedido_listo")
 @router.post("/api/comercio_pedido_listo/")
-def comercio_pedido_listo(req: AccionComercio):
+def comercio_pedido_listo(req: AccionComercio, request: Request):
     id_orden = req.id_pedido or req.id or req.orden_id
+    mobile_auth.require_order_owner(request, id_orden, "comercio")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'listo_recoleccion' WHERE id_pedido = ? AND estado = 'preparacion'", (id_orden,))
@@ -293,7 +297,8 @@ class CoordenadasGPS(BaseModel):
 @router.post("/actualizar_gps/")
 @router.post("/api/actualizar_gps")
 @router.post("/api/actualizar_gps/")
-def actualizar_gps(c: CoordenadasGPS):
+def actualizar_gps(c: CoordenadasGPS, request: Request):
+    mobile_auth.require_order_owner(request, c.id_pedido, "repartidor")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET latitud_repartidor = ?, longitud_repartidor = ? WHERE id_pedido = ?", (c.latitud, c.longitud, c.id_pedido))
@@ -304,7 +309,8 @@ def actualizar_gps(c: CoordenadasGPS):
 @router.post("/actualizar_gps_cliente/")
 @router.post("/api/actualizar_gps_cliente")
 @router.post("/api/actualizar_gps_cliente/")
-def actualizar_gps_cliente(c: CoordenadasGPS):
+def actualizar_gps_cliente(c: CoordenadasGPS, request: Request):
+    mobile_auth.require_order_owner(request, c.id_pedido, "cliente")
     conexion = sqlite3.connect(DB_PATH)
     cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET latitud_cliente = ?, longitud_cliente = ? WHERE id_pedido = ?", (c.latitud, c.longitud, c.id_pedido))
@@ -330,7 +336,8 @@ def obtener_gps(id_pedido: int):
     return {"status": "error", "estado_pedido": "desconocido"}
 
 @router.post("/api/cancelar_pedido/{id_pedido}")
-def cancelar_pedido(id_pedido: int):
+def cancelar_pedido(id_pedido: int, request: Request):
+    mobile_auth.require_order_owner(request, id_pedido, "cliente")
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     try:
         cursor.execute("DELETE FROM pedidos WHERE id_pedido = ? AND estado = 'pendiente'", (id_pedido,))
@@ -348,8 +355,9 @@ def cancelar_pedido(id_pedido: int):
         return {"status": "error", "mensaje": str(e)}
 
 @router.post("/api/cliente/borrar_historial")
-def borrar_historial_cliente(datos: dict):
+def borrar_historial_cliente(datos: dict, request: Request):
     id_pedido = datos.get("id_pedido")
+    mobile_auth.require_order_owner(request, id_pedido, "cliente")
     conexion = sqlite3.connect(DB_PATH); cursor = conexion.cursor()
     cursor.execute("UPDATE pedidos SET estado = 'archivado' WHERE id_pedido = ? AND estado IN ('entregado', 'cancelado')", (id_pedido,))
     

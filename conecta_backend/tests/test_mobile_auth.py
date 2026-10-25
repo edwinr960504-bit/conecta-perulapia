@@ -8,6 +8,7 @@ from contextlib import closing
 from pathlib import Path
 
 from fastapi import HTTPException
+from starlette.requests import Request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -96,6 +97,53 @@ class MobileAuthenticationTests(unittest.TestCase):
         asyncio.run(mobile_auth.mobile_logout(claims))
         with self.assertRaises(HTTPException):
             mobile_auth.verify_mobile_token(response["access_token"])
+
+    @staticmethod
+    def _request(path):
+        return Request(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "https",
+                "path": path,
+                "raw_path": path.encode(),
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 1234),
+                "server": ("test", 443),
+            }
+        )
+
+    def test_authenticated_routes_enforce_role_and_actor_ownership(self):
+        request = self._request("/api/perfil/8")
+        request.state.mobile_user = {"id": 7, "role": "cliente", "jti": "test"}
+        with self.assertRaises(HTTPException) as wrong_owner:
+            mobile_auth.authorize_path_resource(request, request.state.mobile_user)
+        self.assertEqual(wrong_owner.exception.status_code, 403)
+
+        rider_route = self._request("/api/pedidos_disponibles")
+        rider_route.state.mobile_user = request.state.mobile_user
+        with self.assertRaises(HTTPException) as wrong_role:
+            mobile_auth.authorize_path_resource(
+                rider_route, rider_route.state.mobile_user
+            )
+        self.assertEqual(wrong_role.exception.status_code, 403)
+
+    def test_mobile_dependency_rejects_missing_and_invalid_tokens(self):
+        request = self._request("/api/pedidos_disponibles")
+        with self.assertRaises(HTTPException) as missing:
+            asyncio.run(mobile_auth.require_mobile_user(request))
+        self.assertEqual(missing.exception.status_code, 401)
+
+        invalid_request = self._request("/api/pedidos_disponibles")
+        invalid_request.scope["headers"] = [
+            (b"authorization", b"Bearer invalid")
+        ]
+        with self.assertRaises(HTTPException) as invalid:
+            asyncio.run(mobile_auth.require_mobile_user(invalid_request))
+        self.assertEqual(invalid.exception.status_code, 401)
 
     def test_login_rejects_wrong_password_without_issuing_token(self):
         response = tuberias_identidad.login(

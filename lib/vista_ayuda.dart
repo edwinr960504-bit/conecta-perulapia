@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:http/http.dart' as http;
+import 'api_http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'red.dart';
